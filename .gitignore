@@ -1,0 +1,17 @@
+# Environment / secrets
+.env
+*.env
+
+# Claude IDE settings
+.claude/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+
+# macOS
+.DS_Store

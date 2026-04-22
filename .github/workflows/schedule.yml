@@ -1,0 +1,64 @@
+name: Daily Stock Screener
+
+on:
+  # Fires at 08:00 IST (= 02:30 UTC) every weekday (Mon–Fri).
+  # GitHub Actions cron uses UTC; IST = UTC + 5h30m.
+  schedule:
+    - cron: "30 2 * * 1-5"
+
+  # Allow a manual trigger from the Actions tab (useful for testing).
+  workflow_dispatch:
+    inputs:
+      manual_sector:
+        description: "Override sector (leave blank for auto-detection)"
+        required: false
+        default: ""
+
+jobs:
+  run-screener:
+    name: Run Sentiment Screener
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      # ── 1. Checkout code ──────────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── 2. Set up Python 3.11 ─────────────────────────────────────────────
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      # ── 3. Install dependencies ───────────────────────────────────────────
+      - name: Install dependencies
+        run: pip install --upgrade pip && pip install -r requirements.txt
+
+      # ── 4. Run screener ───────────────────────────────────────────────────
+      - name: Run screener
+        env:
+          # Secrets set in: GitHub repo → Settings → Secrets and variables → Actions
+          TWITTER_BEARER_TOKEN: ${{ secrets.TWITTER_BEARER_TOKEN }}
+          SENDER_EMAIL:         ${{ secrets.SENDER_EMAIL }}
+          SENDER_APP_PASSWORD:  ${{ secrets.SENDER_APP_PASSWORD }}
+          RECEIVER_EMAIL:       ${{ secrets.RECEIVER_EMAIL }}
+          # Manual sector: prefer workflow_dispatch input, then secret fallback
+          MANUAL_SECTOR: >-
+            ${{
+              github.event.inputs.manual_sector != ''
+              && github.event.inputs.manual_sector
+              || secrets.MANUAL_SECTOR
+            }}
+        run: python main.py
+
+      # ── 5. Upload logs on failure ─────────────────────────────────────────
+      - name: Upload log artifact on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screener-failure-log
+          path: "*.log"
+          if-no-files-found: ignore
+          retention-days: 7
