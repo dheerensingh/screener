@@ -120,13 +120,29 @@ def main() -> int:
     try:
         logger.info("Step 3: Running RSI + MACD screening on %d stocks ...", len(data))
         qualified, all_results = screen_stocks(data)
-        logger.info("%d stock(s) passed all filters.", len(qualified))
-        if qualified:
-            for r in qualified:
-                logger.info(
-                    "  ✅ %-15s | Price: ₹%8.2f | RSI: %5.1f | %s",
-                    r.ticker, r.current_price, r.rsi, r.macd_status,
-                )
+
+        # ── Full screening report (every stock) ───────────────────────────────
+        logger.info("=" * 90)
+        logger.info(
+            "  %-14s | %-10s | %-6s | %-8s | %-8s | %s",
+            "TICKER", "PRICE (₹)", "RSI", "RSI≥60", "MACD↑", "DETAIL"
+        )
+        logger.info("-" * 90)
+        for r in sorted(all_results, key=lambda x: x.rsi, reverse=True):
+            rsi_pass  = "✅" if "below" not in r.rsi_status  else "❌"
+            macd_pass = "✅" if "bullish" in r.macd_status   else "❌"
+            overall   = "✅ PASS" if r.passes else "❌ FAIL"
+            logger.info(
+                "  %-14s | %10.2f | %6.1f | %-8s | %-8s | [%s] %s",
+                r.ticker, r.current_price, r.rsi,
+                rsi_pass, macd_pass, overall, r.rsi_status,
+            )
+        logger.info("=" * 90)
+        logger.info(
+            "RESULT: %d / %d stocks qualify  |  Filters: RSI(14)≥60 AND MACD line > Signal",
+            len(qualified), len(all_results),
+        )
+        logger.info("=" * 90)
 
     except Exception as exc:
         msg = f"Step 3 (technical analysis) crashed: {exc}"
