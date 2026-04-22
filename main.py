@@ -139,10 +139,24 @@ def main() -> int:
             )
         logger.info("=" * 90)
         logger.info(
-            "RESULT: %d / %d stocks qualify  |  Filters: RSI(14)≥60 AND MACD line > Signal",
-            len(qualified), len(all_results),
+            "SCREENED: %d  |  PASSED: %d  |  FAILED: %d  |  Filters: RSI(14)≥60 AND MACD line > Signal",
+            len(all_results), len(qualified), len(all_results) - len(qualified),
         )
         logger.info("=" * 90)
+
+        # ── Clean final summary of passed stocks only ─────────────────────────
+        logger.info("")
+        logger.info("★  QUALIFIED STOCKS SUMMARY  ★")
+        logger.info("-" * 50)
+        if qualified:
+            for i, r in enumerate(qualified, 1):
+                logger.info(
+                    "  %2d. %-14s | ₹%9.2f | RSI: %.1f | %s",
+                    i, r.ticker, r.current_price, r.rsi, r.macd_status,
+                )
+        else:
+            logger.info("  No stocks passed both filters today.")
+        logger.info("-" * 50)
 
     except Exception as exc:
         msg = f"Step 3 (technical analysis) crashed: {exc}"
