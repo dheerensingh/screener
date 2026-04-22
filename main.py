@@ -88,9 +88,11 @@ def main() -> int:
 
     # ── Step 2: Resolve tickers, fetch data ──────────────────────────────────
     try:
-        logger.info("Step 2: Mapping sector to tickers ...")
+        scan_mode = os.environ.get("SCAN_UNIVERSE", "NIFTY500").upper()
+        logger.info("Step 2: Mapping sector to tickers ... [SCAN_UNIVERSE=%s]", scan_mode)
         tickers, canonical_sector = get_stocks_for_sector(sector)
-        logger.info("Canonical sector: %s | Tickers (%d): %s", canonical_sector, len(tickers), tickers)
+        logger.info("Universe: %s", canonical_sector)
+        logger.info("Total tickers to screen: %d", len(tickers))
 
         logger.info("Step 2: Fetching 6-month OHLCV data via yfinance ...")
         data = fetch_stock_data(tickers, period="6mo")

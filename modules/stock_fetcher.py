@@ -35,15 +35,17 @@ def fetch_stock_data(
     tickers: list[str],
     period: str = "6mo",
     interval: str = "1d",
+    chunk_size: int = 100,
 ) -> dict[str, pd.DataFrame]:
     """
-    Fetches OHLCV data for all tickers.
+    Fetches OHLCV data for all tickers in chunks to avoid yfinance rate limits.
 
     Parameters
     ----------
-    tickers : list of NSE ticker symbols (without .NS suffix)
-    period  : yfinance period string — "6mo", "1y", etc.
-    interval: "1d" for daily bars
+    tickers    : list of NSE ticker symbols (without .NS suffix)
+    period     : yfinance period string — "6mo", "1y", etc.
+    interval   : "1d" for daily bars
+    chunk_size : number of tickers per batch request (100 is safe for yfinance)
 
     Returns
     -------
@@ -51,59 +53,59 @@ def fetch_stock_data(
     [Open, High, Low, Close, Volume].  Tickers with insufficient data are
     omitted with a logged warning.
     """
+    import math
     ns_tickers = [_to_ns_ticker(t) for t in tickers]
+    orig_map = {_to_ns_ticker(t): t for t in tickers}  # ns → original
     result: dict[str, pd.DataFrame] = {}
 
-    # ── Batch download ────────────────────────────────────────────────────────
-    try:
-        raw = yf.download(
-            tickers=ns_tickers,
-            period=period,
-            interval=interval,
-            auto_adjust=True,
-            progress=False,
-            threads=True,
-            group_by="ticker",
-        )
-        logger.info("Batch download complete for %d symbols", len(ns_tickers))
-    except Exception as exc:
-        logger.error("yfinance batch download failed: %s — attempting per-ticker fallback", exc)
-        raw = pd.DataFrame()
+    total_chunks = math.ceil(len(ns_tickers) / chunk_size)
+    logger.info(
+        "Downloading data for %d symbols in %d chunk(s) of %d ...",
+        len(ns_tickers), total_chunks, chunk_size,
+    )
 
-    # ── Parse batch result ────────────────────────────────────────────────────
-    if not raw.empty:
-        if isinstance(raw.columns, pd.MultiIndex):
-            # Multi-ticker download returns a MultiIndex: (field, ticker)
-            for orig, ns in zip(tickers, ns_tickers):
-                try:
-                    df = raw[ns] if ns in raw.columns.get_level_values(1) else raw.xs(ns, axis=1, level=1)
-                    df = _clean(df, orig)
+    for chunk_idx in range(total_chunks):
+        chunk_ns = ns_tickers[chunk_idx * chunk_size : (chunk_idx + 1) * chunk_size]
+        logger.info("  Chunk %d/%d — fetching %d symbols ...", chunk_idx + 1, total_chunks, len(chunk_ns))
+
+        # ── Batch download this chunk ─────────────────────────────────────────
+        raw = pd.DataFrame()
+        try:
+            raw = yf.download(
+                tickers=chunk_ns,
+                period=period,
+                interval=interval,
+                auto_adjust=True,
+                progress=False,
+                threads=True,
+                group_by="ticker",
+            )
+        except Exception as exc:
+            logger.error("Chunk %d batch download failed: %s", chunk_idx + 1, exc)
+
+        # ── Parse this chunk's result ─────────────────────────────────────────
+        if not raw.empty:
+            if isinstance(raw.columns, pd.MultiIndex):
+                for ns in chunk_ns:
+                    orig = orig_map.get(ns, ns.replace(NSE_SUFFIX, ""))
+                    try:
+                        level1 = raw.columns.get_level_values(1)
+                        if ns in level1:
+                            df = raw.xs(ns, axis=1, level=1)
+                        else:
+                            continue
+                        df = _clean(df, orig)
+                        if df is not None:
+                            result[orig] = df
+                    except Exception as exc:
+                        logger.debug("Parsing %s failed: %s", orig, exc)
+            else:
+                # Single ticker in chunk — flat columns
+                if len(chunk_ns) == 1:
+                    orig = orig_map.get(chunk_ns[0], chunk_ns[0].replace(NSE_SUFFIX, ""))
+                    df = _clean(raw, orig)
                     if df is not None:
                         result[orig] = df
-                except Exception as exc:
-                    logger.debug("Parsing batch data for %s failed: %s", orig, exc)
-        else:
-            # Single-ticker batch returns flat columns
-            if len(tickers) == 1:
-                df = _clean(raw, tickers[0])
-                if df is not None:
-                    result[tickers[0]] = df
-
-    # ── Per-ticker fallback for any missing symbols ────────────────────────────
-    missing = [t for t in tickers if t not in result]
-    if missing:
-        logger.info("Fetching %d symbols individually (batch miss)", len(missing))
-        for orig in missing:
-            ns = _to_ns_ticker(orig)
-            try:
-                ticker_obj = yf.Ticker(ns)
-                df = ticker_obj.history(period=period, interval=interval, auto_adjust=True)
-                df = _clean(df, orig)
-                if df is not None:
-                    result[orig] = df
-                    logger.debug("Per-ticker fetch succeeded: %s", orig)
-            except Exception as exc:
-                logger.warning("Per-ticker fetch failed for %s: %s", orig, exc)
 
     logger.info(
         "Data available for %d / %d requested tickers", len(result), len(tickers)

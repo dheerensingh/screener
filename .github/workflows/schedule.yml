@@ -51,6 +51,8 @@ jobs:
               && github.event.inputs.manual_sector
               || secrets.MANUAL_SECTOR
             }}
+          # NIFTY50 (50, fast) | NIFTY200 (200) | NIFTY500 (500, default) | NSE_ALL (1800+, ~15min)
+          SCAN_UNIVERSE: ${{ secrets.SCAN_UNIVERSE || 'NIFTY500' }}
         run: python main.py
 
       # ── 5. Upload logs on failure ─────────────────────────────────────────

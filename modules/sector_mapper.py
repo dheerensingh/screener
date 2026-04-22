@@ -112,11 +112,12 @@ def get_stocks_for_sector(sector: Optional[str]) -> tuple[list[str], str]:
     """
     Returns (tickers_without_suffix, canonical_sector_name).
 
-    Falls back to a broad large-cap basket when the sector is unknown,
-    so the pipeline always has something to screen.
+    Falls back to the full Nifty500 universe when the sector is unknown,
+    so the pipeline always has something meaningful to screen.
     """
     if sector is None:
-        return _broad_market_basket(), "Broad Market (sector undetected)"
+        tickers = fetch_nifty500_tickers()
+        return tickers, f"Broad Market — Nifty500 ({len(tickers)} stocks)"
 
     # Resolve aliases
     canonical = SECTOR_ALIASES.get(sector, sector)
@@ -130,14 +131,45 @@ def get_stocks_for_sector(sector: Optional[str]) -> tuple[list[str], str]:
         if sector.lower() in key.lower() or key.lower() in sector.lower():
             return list(SECTOR_STOCKS[key]), key
 
-    return _broad_market_basket(), f"Broad Market (unknown sector: {sector})"
+    # Unknown sector — scan full Nifty500
+    tickers = fetch_nifty500_tickers()
+    return tickers, f"Broad Market — Nifty500 ({len(tickers)} stocks, unknown sector: {sector})"
 
 
-def _broad_market_basket() -> list[str]:
-    """Top 20 Nifty50 heavyweights — used as fallback universe."""
-    return [
-        "RELIANCE", "TCS", "HDFCBANK", "ICICIBANK", "INFY",
-        "HINDUNILVR", "ITC", "SBIN", "BHARTIARTL", "KOTAKBANK",
-        "LT", "AXISBANK", "ASIANPAINT", "MARUTI", "BAJFINANCE",
-        "SUNPHARMA", "NTPC", "TITAN", "WIPRO", "ULTRACEMCO",
-    ]
+def fetch_nifty500_tickers() -> list[str]:
+    """
+    Downloads the live Nifty500 constituent list from NSE's public archive CSV.
+    No authentication required. Falls back to a hardcoded Nifty50 basket if
+    the download fails (network issue in CI, etc.).
+
+    NSE CSV columns: Company Name, Industry, Symbol, Series, ISIN Code
+    We only need the 'Symbol' column.
+    """
+    import io
+    import logging
+    import requests
+
+    logger = logging.getLogger(__name__)
+    url = "https://archives.nseindia.com/content/indices/ind_nifty500list.csv"
+    headers = {"User-Agent": "Mozilla/5.0 (compatible; StockScreener/1.0)"}
+
+    try:
+        resp = requests.get(url, headers=headers, timeout=15)
+        resp.raise_for_status()
+        import pandas as pd
+        df = pd.read_csv(io.StringIO(resp.text))
+        # Column is named 'Symbol' in NSE CSV
+        symbols = df["Symbol"].dropna().str.strip().tolist()
+        # Filter to equity series only (remove ETFs, etc. that sneak in)
+        symbols = [s for s in symbols if s.isalpha() or "&" in s or "-" in s]
+        logger.info("Nifty500 list fetched from NSE: %d symbols", len(symbols))
+        return symbols
+    except Exception as exc:
+        logger.warning("Failed to fetch Nifty500 from NSE (%s) — using hardcoded Nifty50 fallback", exc)
+        return _nifty50_fallback()
+
+
+def _nifty50_fallback() -> list[str]:
+    """~500 hardcoded liquid NSE stocks — used only when NSE CSV download fails."""
+    from .stock_universe import _NIFTY50, _NIFTY_NEXT_50, _NIFTY_MIDCAP100, _NIFTY_SMALLCAP150
+    return _NIFTY50 + _NIFTY_NEXT_50 + _NIFTY_MIDCAP100 + _NIFTY_SMALLCAP150
