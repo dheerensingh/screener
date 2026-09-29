@@ -1,12 +1,25 @@
 """
-Daily Sentiment-Driven Stock Screener
-Entry point — orchestrates all five modules.
+Sector-Rotation + Momentum Stock Screener
+Entry point — orchestrates all pipeline modules.
 
 Pipeline:
-  1. Extract sector from @BasantBaheti3 tweets
-  2. Map sector → NSE tickers, fetch 6-month OHLCV data
-  3. Screen stocks: RSI(14) ≥ 60 AND MACD bullish
-  4. Send HTML email with results (always sent — even on partial failure)
+  1. Rank all NSE sectors (full Nifty500 universe) by relative strength vs the
+     benchmark (sector_rotation.py); also get universe-wide RS Ratings + the
+     raw benchmark series for the market-regime check.
+  1b. Market regime filter (market_regime.py): pause new entries entirely if
+      the Nifty500 benchmark isn't in its own uptrend.
+  2. Confirm the leading sector(s) with YoY profit-growth data (fundamental_analyzer.py)
+  3. Screen the leading sector(s)' baskets for momentum stocks — RSI/MACD +
+     Minervini's Trend Template/RS Rating gate (technical_analyzer.py, trend_template.py)
+  3a. Governance gate on the qualified stocks — reject any with a confirmed
+      promoter share pledge (governance_analyzer.py); a declining promoter
+      holding trend is surfaced but does not gate (see STRATEGY.md §12).
+  3b. Allocate the portfolio across sectors — per-sector cap, budget-aware
+      sizing, portfolio-heat ceiling, cap-band risk scaling (portfolio_allocator.py,
+      position_sizer.py)
+  3c. Log today's accepted signals for the paper-trading forward test (paper_trade_log.py)
+  4. Publish an HTML report to docs/ for GitHub Pages (report_generator.py)
+  5. Send a short summary email with a link to the report (email_alerter.py)
 
 Run locally:
   pip install -r requirements.txt
@@ -15,6 +28,8 @@ Run locally:
 
 Run via GitHub Actions:
   Push to main → Actions → "Daily Stock Screener" workflow fires at 08:00 IST.
+
+See CLAUDE.md for the architecture/data-source decisions behind this pipeline.
 """
 
 import logging
@@ -22,22 +37,24 @@ import os
 import sys
 from datetime import datetime
 
-# Load .env file when running locally (GitHub Actions injects secrets as env vars directly)
 try:
     from dotenv import load_dotenv
     load_dotenv()
 except ImportError:
     pass  # python-dotenv not installed — rely on environment variables already set
 
-from modules.twitter_extractor import get_sector
-from modules.sector_mapper import get_stocks_for_sector
-from modules.stock_fetcher import fetch_stock_data
+from modules.sector_rotation import rank_sectors, leading_sectors
+from modules.fundamental_analyzer import sector_confirmation
+from modules.governance_analyzer import sector_governance_check
+from modules.delivery_analyzer import fetch_latest_delivery_pct
 from modules.technical_analyzer import screen_stocks
-from modules.email_alerter import build_html_email, send_email, send_error_email
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Logging
-# ─────────────────────────────────────────────────────────────────────────────
+from modules.market_regime import evaluate as evaluate_market_regime
+from modules.fii_dii_flow import fetch_latest_flow
+from modules.portfolio_allocator import allocate as allocate_portfolio
+from modules.position_sizer import get_account_size
+from modules.report_generator import SectorBundle, build_report_html, publish_report
+from modules.email_alerter import build_summary_email, send_email, send_error_email
+from modules.paper_trade_log import check_exits, log_signals
 
 logging.basicConfig(
     level=logging.INFO,
@@ -46,143 +63,189 @@ logging.basicConfig(
 )
 logger = logging.getLogger("screener.main")
 
-TWITTER_HANDLE = "BasantBaheti3"
-TWEET_FETCH_COUNT = 20
-
 
 def main() -> int:
-    """
-    Returns 0 on success (email sent), 1 on critical failure (email also attempted).
-    """
     start = datetime.now()
-    logger.info("=== Daily Stock Screener starting at %s ===", start.strftime("%Y-%m-%d %H:%M:%S"))
+    logger.info("=== Sector Screener starting at %s ===", start.strftime("%Y-%m-%d %H:%M:%S"))
 
     errors: list[str] = []
-    sector: str | None = None
-    sector_source: str = "error"
-    qualified = []
-    all_results = []
 
-    # ── Step 1: Detect sector from tweets ────────────────────────────────────
+    # ── Step 1: Rank sectors by relative strength ────────────────────────────
     try:
-        logger.info("Step 1: Fetching tweets from @%s ...", TWITTER_HANDLE)
-        sector, sector_source = get_sector(TWITTER_HANDLE, TWEET_FETCH_COUNT)
-
-        if sector is None:
-            msg = (
-                "Sector detection returned None — tweets may not discuss any "
-                "mapped sector, or all fetch methods failed. Falling back to broad market."
-            )
-            logger.warning(msg)
-            errors.append(msg)
-        else:
-            logger.info("Sector detected: %s (via %s)", sector, sector_source)
-
-    except Exception as exc:
-        msg = f"Step 1 (tweet extraction) crashed unexpectedly: {exc}"
-        logger.exception(msg)
-        errors.append(msg)
-        # send a minimal error email and exit
-        send_error_email(errors)
-        return 1
-
-    # ── Step 2: Resolve tickers, fetch data ──────────────────────────────────
-    try:
-        scan_mode = os.environ.get("SCAN_UNIVERSE", "NIFTY500").upper()
-        logger.info("Step 2: Mapping sector to tickers ... [SCAN_UNIVERSE=%s]", scan_mode)
-        tickers, canonical_sector = get_stocks_for_sector(sector)
-        logger.info("Universe: %s", canonical_sector)
-        logger.info("Total tickers to screen: %d", len(tickers))
-
-        logger.info("Step 2: Fetching 6-month OHLCV data via yfinance ...")
-        data = fetch_stock_data(tickers, period="6mo")
-
-        if not data:
-            msg = "yfinance returned no usable data for any ticker in this sector."
+        logger.info("Step 1: Ranking sectors by relative strength vs Nifty500 ...")
+        rotation = rank_sectors()
+        if not rotation.scores:
+            msg = "Sector rotation produced no scored sectors — aborting."
             logger.error(msg)
             errors.append(msg)
             send_error_email(errors)
             return 1
-
-        missing_count = len(tickers) - len(data)
-        if missing_count:
-            errors.append(
-                f"{missing_count} ticker(s) had insufficient data and were skipped: "
-                + ", ".join(t for t in tickers if t not in data)
-            )
-
+        all_scores = rotation.scores
+        leading = leading_sectors(all_scores)
+        logger.info("Leading sector(s): %s", [s.sector for s in leading])
     except Exception as exc:
-        msg = f"Step 2 (data fetching) crashed: {exc}"
+        msg = f"Step 1 (sector rotation) crashed: {exc}"
         logger.exception(msg)
         errors.append(msg)
         send_error_email(errors)
         return 1
 
-    # ── Step 3: Technical screening ───────────────────────────────────────────
+    # ── Step 1b: Market regime — pause NEW entries if the broad market isn't
+    #             in an uptrend (existing positions aren't tracked by this repo
+    #             yet, so this only affects whether today generates new signals) ──
+    regime = evaluate_market_regime(rotation.benchmark, breadth_pct=rotation.breadth_pct)
+    logger.info("Market regime: %s", regime.reason)
+    if not regime.in_uptrend:
+        errors.append(f"Market regime filter: {regime.reason} — no new entries today.")
+
     try:
-        logger.info("Step 3: Running RSI + MACD screening on %d stocks ...", len(data))
-        qualified, all_results = screen_stocks(data)
-
-        # ── Full screening report (every stock) ───────────────────────────────
-        logger.info("=" * 90)
-        logger.info(
-            "  %-14s | %-10s | %-6s | %-8s | %-8s | %s",
-            "TICKER", "PRICE (₹)", "RSI", "RSI≥60", "MACD↑", "DETAIL"
-        )
-        logger.info("-" * 90)
-        for r in sorted(all_results, key=lambda x: x.rsi, reverse=True):
-            rsi_pass  = "✅" if "below" not in r.rsi_status  else "❌"
-            macd_pass = "✅" if "bullish" in r.macd_status   else "❌"
-            overall   = "✅ PASS" if r.passes else "❌ FAIL"
-            logger.info(
-                "  %-14s | %10.2f | %6.1f | %-8s | %-8s | [%s] %s",
-                r.ticker, r.current_price, r.rsi,
-                rsi_pass, macd_pass, overall, r.rsi_status,
-            )
-        logger.info("=" * 90)
-        logger.info(
-            "SCREENED: %d  |  PASSED: %d  |  FAILED: %d  |  Filters: RSI(14)≥60 AND MACD line > Signal",
-            len(all_results), len(qualified), len(all_results) - len(qualified),
-        )
-        logger.info("=" * 90)
-
-        # ── Clean final summary of passed stocks only ─────────────────────────
-        logger.info("")
-        logger.info("★  QUALIFIED STOCKS SUMMARY  ★")
-        logger.info("-" * 50)
-        if qualified:
-            for i, r in enumerate(qualified, 1):
-                logger.info(
-                    "  %2d. %-14s | ₹%9.2f | RSI: %.1f | %s",
-                    i, r.ticker, r.current_price, r.rsi, r.macd_status,
-                )
+        flow = fetch_latest_flow()
+        if flow.error:
+            logger.warning("FII/DII flow unavailable (non-fatal): %s", flow.error)
         else:
-            logger.info("  No stocks passed both filters today.")
-        logger.info("-" * 50)
-
+            logger.info(
+                "FII/DII flow (%s, informational, not backtested): FII ₹%+.0f cr, DII ₹%+.0f cr",
+                flow.date, flow.fii_net_cr or 0.0, flow.dii_net_cr or 0.0,
+            )
     except Exception as exc:
-        msg = f"Step 3 (technical analysis) crashed: {exc}"
-        logger.exception(msg)
-        errors.append(msg)
-        # Don't abort — still send email with whatever we have
+        logger.warning("FII/DII flow check crashed (non-fatal): %s", exc)
+        flow = None
 
-    # ── Step 4: Build and send email ──────────────────────────────────────────
-    try:
-        logger.info("Step 4: Building HTML email ...")
-        html = build_html_email(
-            sector=canonical_sector if sector else None,
-            sector_source=sector_source,
+    # ── Step 2: Per leading sector — fundamentals + screening ────────────────
+    account_size = get_account_size()
+    bundles: list[SectorBundle] = []
+    sector_qualifiers: dict[str, list] = {}
+
+    for score in leading:
+        sector = score.sector
+        try:
+            logger.info("Step 2 [%s]: Fundamental confirmation ...", sector)
+            fundamental_results, fundamental_summary = sector_confirmation(list(score.data.keys()))
+        except Exception as exc:
+            msg = f"Fundamental confirmation failed for {sector}: {exc}"
+            logger.warning(msg)
+            errors.append(msg)
+            fundamental_results, fundamental_summary = [], "Fundamental check failed"
+
+        try:
+            logger.info("Step 3 [%s]: Momentum screening on %d stocks ...", sector, len(score.data))
+            try:
+                delivery_pct = fetch_latest_delivery_pct(list(score.data.keys()))
+            except Exception as exc:
+                logger.warning("Delivery %% fetch failed for %s (non-fatal, informational only): %s", sector, exc)
+                delivery_pct = {}
+            qualified, all_results = screen_stocks(
+                score.data, sector_index=score.synthetic_index, cap_bands=score.cap_bands,
+                rs_ratings=rotation.rs_ratings, delivery_pct=delivery_pct,
+            )
+            logger.info(
+                "  [%s] %d / %d stocks qualify", sector, len(qualified), len(all_results),
+            )
+        except Exception as exc:
+            msg = f"Momentum screening failed for {sector}: {exc}"
+            logger.warning(msg)
+            errors.append(msg)
+            qualified, all_results = [], []
+
+        try:
+            if qualified:
+                logger.info("Step 3a [%s]: Governance check on %d qualifier(s) ...", sector, len(qualified))
+                governance_results, governance_summary = sector_governance_check(
+                    [r.ticker for r in qualified]
+                )
+                pledge_flagged = {gr.ticker for gr in governance_results if gr.pledge_flag}
+                if pledge_flagged:
+                    logger.info("  [%s] Governance gate rejected (pledge): %s", sector, pledge_flagged)
+                qualified = [r for r in qualified if r.ticker not in pledge_flagged]
+            else:
+                governance_results, governance_summary = [], "No qualifiers to check"
+        except Exception as exc:
+            msg = f"Governance check failed for {sector}: {exc}"
+            logger.warning(msg)
+            errors.append(msg)
+            governance_results, governance_summary = [], "Governance check failed"
+
+        sector_qualifiers[sector] = qualified
+        bundles.append(SectorBundle(
+            score=score,
+            fundamental_summary=fundamental_summary,
+            fundamental_results=fundamental_results,
             qualified=qualified,
             all_results=all_results,
+            position_sizes={},  # filled in below by the portfolio allocator
+            governance_summary=governance_summary,
+            governance_results=governance_results,
+        ))
+
+    # ── Step 3b: Portfolio-level allocation (Gap 2 — per-sector cap, budget-aware
+    #             sizing, portfolio-heat ceiling, cap-band risk scaling) ─────────
+    if regime.in_uptrend:
+        try:
+            logger.info("Step 3b: Allocating portfolio across %d sectors' qualifiers ...", len(sector_qualifiers))
+            allocation = allocate_portfolio(sector_qualifiers, account_size=account_size)
+            logger.info(
+                "  Accepted %d, rejected %d — deployed %.1f%% capital, %.1f%% heat",
+                len(allocation.accepted), len(allocation.rejected),
+                allocation.total_deployed_pct, allocation.total_heat_pct,
+            )
+            accepted_by_ticker = {r.ticker: pos for r, pos in allocation.accepted}
+            for bundle in bundles:
+                bundle.position_sizes = {
+                    t: pos for t, pos in accepted_by_ticker.items()
+                    if t in {r.ticker for r in bundle.qualified}
+                }
+        except Exception as exc:
+            msg = f"Step 3b (portfolio allocation) crashed: {exc}"
+            logger.exception(msg)
+            errors.append(msg)
+    else:
+        logger.info("Step 3b: Skipped (market regime not in uptrend) — no positions sized today.")
+
+    # ── Step 3c: Paper-trade log — close positions that hit an exit rule, then
+    #             log today's newly-accepted entries ───────────────────────────
+    try:
+        closed = check_exits()
+        if closed:
+            logger.info("Paper trade log: %d position(s) closed today.", closed)
+    except Exception as exc:
+        logger.warning("Paper-trade exit check failed (non-fatal): %s", exc)
+    try:
+        log_signals(bundles)
+    except Exception as exc:
+        logger.warning("Paper-trade logging failed (non-fatal): %s", exc)
+
+    # ── Step 4: Build + publish the HTML report ───────────────────────────────
+    report_url = None
+    try:
+        logger.info("Step 4: Building + publishing HTML report ...")
+        html = build_report_html(all_scores, bundles, account_size, errors, regime=regime, flow=flow)
+        dated_path, _ = publish_report(html)
+        pages_base = os.environ.get("PAGES_BASE_URL", "").rstrip("/")
+        if pages_base:
+            report_url = f"{pages_base}/{os.path.relpath(dated_path, 'docs')}"
+    except Exception as exc:
+        msg = f"Step 4 (report generation) crashed: {exc}"
+        logger.exception(msg)
+        errors.append(msg)
+
+    # ── Step 5: Send summary email ─────────────────────────────────────────────
+    try:
+        logger.info("Step 5: Sending summary email ...")
+        qualified_rows = [
+            (r.ticker, r.current_price,
+             bundle.position_sizes[r.ticker].quantity if r.ticker in bundle.position_sizes else 0,
+             bundle.position_sizes[r.ticker].allocation_pct if r.ticker in bundle.position_sizes else 0.0)
+            for bundle in bundles for r in bundle.qualified
+        ]
+        html = build_summary_email(
+            leading_sectors=[b.score.sector for b in bundles],
+            qualified_rows=qualified_rows,
+            report_url=report_url,
             errors=errors,
         )
-
         today_str = datetime.now().strftime("%d %b %Y")
-        subject = (
-            f"📊 Screener [{canonical_sector}]: {len(qualified)} stock(s) qualify — {today_str}"
-            if qualified
-            else f"📊 Screener [{canonical_sector}]: No qualifiers today — {today_str}"
-        )
+        total_qualified = sum(len(b.qualified) for b in bundles)
+        subject = f"📊 Sector Screener: {total_qualified} stock(s) qualify — {today_str}"
 
         sent = send_email(html, subject)
         if sent:
@@ -192,7 +255,7 @@ def main() -> int:
             return 1
 
     except Exception as exc:
-        logger.exception("Step 4 (email) crashed: %s", exc)
+        logger.exception("Step 5 (email) crashed: %s", exc)
         return 1
 
     elapsed = (datetime.now() - start).total_seconds()

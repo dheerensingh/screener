@@ -1,175 +1,162 @@
 """
-Module 2a: Sector-to-Stock Mapping
+Module: Sector Universe (NSE-sourced)
 
-Maps each detected sector to a curated list of NSE tickers (without the .NS suffix;
-that is appended by stock_fetcher.py for Yahoo Finance compatibility).
+Builds the sector -> stock mapping from NSE's own free, static index-
+constituent CSVs (archives.nseindia.com — a different, unaffected subdomain
+from www.nseindia.com's blocked API; see CLAUDE.md) rather than a hand-picked
+list. This, as of 2026-09-27:
 
-Curation rationale:
-  - Top 10–15 liquid, widely-tracked names per sector.
-  - Prioritises large- and mid-caps where option liquidity and analyst coverage
-    make technical signals more reliable.
-  - Avoids illiquid micro-caps where RSI can spike on thin volume.
-  - Updated for NSE as of 2025; verify tickers via finance.yahoo.com/<TICKER>.NS
-    if yfinance returns empty DataFrames for any symbol.
+  - Covers the full Nifty500 universe. NSE itself builds Nifty500 as
+    Nifty100 + Midcap150 + Smallcap250 (confirmed: those two lists add zero
+    tickers beyond what's already in Nifty500), so fetching Nifty500 alone
+    is the full large+mid+small-cap universe. Each stock is tagged with its
+    cap band (Large/Mid/Small) from which of those lists it appears in.
+  - Uses NSE's own ~20 "Industry" categories as the sector taxonomy for most
+    stocks — authoritative and self-maintaining, unlike a hand-picked list.
+    A category with no direct equivalent in our older sector names (e.g.
+    "Capital Goods", "Textiles") becomes its own sector rather than being
+    silently dropped.
+  - Overrides the generic Industry tag with NSE's own official thematic
+    index lists where one exists and is more specific: Nifty India Defence,
+    Nifty PSE (our "PSU" theme), Nifty Infra (a better-curated Infrastructure
+    basket than the old manual list — and its ticker for the defence maker
+    is `MTARTECH`, not `MTAR`, which is why that symbol kept failing on
+    yfinance under the old hand-picked list).
+  - Falls back to a small manually curated list only for "Railways" — no
+    official NSE index covers this theme (checked several plausible CSV
+    filenames; none exist).
+
+No login, no paid plan, no scraping of a protected endpoint — just CSV
+downloads from the same archives.nseindia.com subdomain already used
+successfully elsewhere in this repo (the old Nifty500-constituent fetch).
 """
 
-from typing import Optional
+import io
+import logging
+from dataclasses import dataclass
 
-# fmt: off
-SECTOR_STOCKS: dict[str, list[str]] = {
-    "Defense": [
-        "HAL", "BEL", "BEML", "COCHINSHIP", "GRSE", "MAZDOCK",
-        "BHARATFORG", "SOLARINDS", "PARAS", "DATAPATTNS",
-        "BHEL", "MTAR",
-    ],
-    "Railways": [
-        "IRCTC", "RVNL", "RAILTEL", "IRCON", "RITES",
-        "TITAGARH", "JUNIPERHOTEL",  # Jupiter Wagons is JUBLPHARMA — see note
-        "IRFC", "TEXRAIL", "KERNEX",
-    ],
-    "IT": [
-        "TCS", "INFY", "WIPRO", "HCLTECH", "TECHM",
-        "LTIM", "MPHASIS", "PERSISTENT", "COFORGE", "OFSS",
-        "KPITTECH", "TATAELXSI",
-    ],
-    "Pharma": [
-        "SUNPHARMA", "DRREDDY", "CIPLA", "DIVISLAB", "LUPIN",
-        "AUROPHARMA", "BIOCON", "ALKEM", "TORNTPHARM", "IPCALAB",
-        "GLENMARK", "ABBOTINDIA",
-    ],
-    "Banking": [
-        "HDFCBANK", "ICICIBANK", "SBIN", "KOTAKBANK", "AXISBANK",
-        "INDUSINDBK", "BANDHANBNK", "FEDERALBNK", "IDFCFIRSTB",
-        "AUBANK", "RBLBANK", "CANBK",
-    ],
-    "FMCG": [
-        "HINDUNILVR", "NESTLEIND", "BRITANNIA", "DABUR", "MARICO",
-        "ITC", "GODREJCP", "EMAMILTD", "TATACONSUM", "COLPAL",
-        "PGHH", "BIKAJI",
-    ],
-    "Auto": [
-        "MARUTI", "TATAMOTORS", "M&M", "HEROMOTOCO", "BAJAJ-AUTO",
-        "EICHERMOT", "MOTHERSON", "BOSCHLTD", "BHARATFORG",
-        "SUNDRMFAST", "TIINDIA", "BALKRISIND",
-    ],
-    "Metals": [
-        "TATASTEEL", "JSWSTEEL", "HINDALCO", "VEDL", "SAIL",
-        "NATIONALUM", "NMDC", "HINDZINC", "APLAPOLLO", "RATNAMANI",
-        "JSWINFRA",
-    ],
-    "Energy": [
-        "NTPC", "POWERGRID", "ADANIGREEN", "TORNTPOWER", "CESC",
-        "ONGC", "IOC", "BPCL", "PETRONET", "GAIL",
-        "TATAPOWER", "SJVN",
-    ],
-    "Infrastructure": [
-        "LT", "NCC", "KNRCON", "PNCINFRA", "KEC",
-        "KALPATPOWR", "IRB", "ASHOKA", "HGINFRA", "GPPL",
-        "AHLUCONT", "JKCEMENT",
-    ],
-    "Chemicals": [
-        "PIDILITIND", "ASIANPAINT", "AARTIIND", "VINATIORGA", "DEEPAKNTR",
-        "NAVINFLUOR", "FINEORG", "GALAXYSURF", "BALAMINES", "TATACHEM",
-        "GHCL", "GUJALKALI",
-    ],
-    "Telecom": [
-        "BHARTIARTL", "INDUSTOWER", "TATACOMM", "RAILTEL",
-        "VINDHYATEL", "ITI",
-    ],
-    "PSU": [
-        "COALINDIA", "BHEL", "HAL", "NTPC", "POWERGRID",
-        "ONGC", "IOC", "BPCL", "GAIL", "SAIL",
-        "NATIONALUM", "NMDC",
-    ],
-    "Real Estate": [
-        "DLF", "GODREJPROP", "OBEROIRLTY", "PRESTIGE", "PHOENIXLTD",
-        "SOBHA", "MAHLIFE", "BRIGADE", "SUNTECK", "LODHA",
-    ],
+import pandas as pd
+import requests
+
+logger = logging.getLogger(__name__)
+
+ARCHIVE_BASE = "https://archives.nseindia.com/content/indices"
+HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; StockScreener/1.0)"}
+REQUEST_TIMEOUT = 20
+
+UNIVERSE_FILE = "ind_nifty500list.csv"
+
+CAP_BAND_FILES = {
+    "Large": "ind_nifty100list.csv",
+    "Mid": "ind_niftymidcap150list.csv",
+    "Small": "ind_niftysmallcap250list.csv",
 }
-# fmt: on
 
-# Aliases so the extractor's sector names map cleanly
-SECTOR_ALIASES: dict[str, str] = {
-    "Information Technology": "IT",
-    "Technology": "IT",
-    "Pharmaceutical": "Pharma",
+# Official NSE thematic index constituent lists, applied as overrides — take
+# priority over the generic Industry tag below, since they're a more specific
+# classification than "Capital Goods" / "Services" etc.
+THEMATIC_FILES = {
+    "Defense": "ind_niftyindiadefence_list.csv",
+    "PSU": "ind_niftypselist.csv",
+    "Infrastructure": "ind_niftyinfralist.csv",
+}
+
+# No official NSE index exists for this theme (confirmed 2026-09-27) — kept
+# as a small manual override, applied with the same priority as the official
+# thematic files above. (The old list's "JUNIPERHOTEL" entry was a data-entry
+# error — dropped.)
+RAILWAYS_TICKERS = [
+    "IRCTC", "RVNL", "RAILTEL", "IRCON", "RITES", "TITAGARH", "IRFC", "TEXRAIL", "KERNEX",
+]
+
+# NSE's raw "Industry" value -> our sector label. A category left out of this
+# map keeps its NSE name as-is (e.g. "Capital Goods", "Textiles", "Services"),
+# so every Nifty500 stock lands in *some* sector — nothing is silently dropped.
+INDUSTRY_TO_SECTOR = {
+    "Automobile and Auto Components": "Auto",
     "Healthcare": "Pharma",
-    "Bank": "Banking",
-    "Finance": "Banking",
-    "Consumer": "FMCG",
-    "Automobile": "Auto",
-    "Metal": "Metals",
-    "Steel": "Metals",
+    "Financial Services": "Banking",
+    "Fast Moving Consumer Goods": "FMCG",
+    "Metals & Mining": "Metals",
+    "Oil Gas & Consumable Fuels": "Energy",
     "Power": "Energy",
-    "Oil": "Energy",
-    "Infra": "Infrastructure",
-    "Chemical": "Chemicals",
+    "Telecommunication": "Telecom",
     "Realty": "Real Estate",
+    "Information Technology": "IT",
 }
 
+MAX_STOCKS_PER_SECTOR = 40  # keeps per-run yfinance/Screener.in volume predictable
 
-def get_stocks_for_sector(sector: Optional[str]) -> tuple[list[str], str]:
+
+@dataclass
+class UniverseStock:
+    ticker: str
+    sector: str
+    cap_band: str  # "Large" / "Mid" / "Small"
+
+
+def _fetch_csv(filename: str) -> pd.DataFrame:
+    url = f"{ARCHIVE_BASE}/{filename}"
+    resp = requests.get(url, headers=HEADERS, timeout=REQUEST_TIMEOUT)
+    resp.raise_for_status()
+    return pd.read_csv(io.StringIO(resp.text))
+
+
+def _cap_bands() -> dict[str, str]:
+    """ticker -> 'Large' / 'Mid' / 'Small', from NSE's own index membership."""
+    bands: dict[str, str] = {}
+    for band, filename in CAP_BAND_FILES.items():
+        try:
+            df = _fetch_csv(filename)
+            for t in df["Symbol"].dropna().str.strip():
+                bands[t] = band
+        except Exception as exc:
+            logger.warning("Could not fetch %s cap-band list (%s): %s", band, filename, exc)
+    return bands
+
+
+def _thematic_overrides() -> dict[str, str]:
+    """ticker -> sector, for the Railways manual list plus official NSE thematic indices."""
+    overrides: dict[str, str] = {t: "Railways" for t in RAILWAYS_TICKERS}
+    for sector, filename in THEMATIC_FILES.items():
+        try:
+            df = _fetch_csv(filename)
+            for t in df["Symbol"].dropna().str.strip():
+                overrides.setdefault(t, sector)
+        except Exception as exc:
+            logger.warning("Could not fetch %s thematic list (%s): %s", sector, filename, exc)
+    return overrides
+
+
+def build_universe() -> list[UniverseStock]:
     """
-    Returns (tickers_without_suffix, canonical_sector_name).
-
-    Falls back to the full Nifty500 universe when the sector is unknown,
-    so the pipeline always has something meaningful to screen.
+    Full Nifty500 universe, each stock tagged with its sector (thematic
+    override, or NSE Industry) and cap band. Uncapped — callers apply
+    MAX_STOCKS_PER_SECTOR / liquidity filtering downstream, where the actual
+    traded-volume data is available (sector_rotation.py).
     """
-    if sector is None:
-        tickers = fetch_nifty500_tickers()
-        return tickers, f"Broad Market — Nifty500 ({len(tickers)} stocks)"
+    nifty500 = _fetch_csv(UNIVERSE_FILE)
+    bands = _cap_bands()
+    overrides = _thematic_overrides()
 
-    # Resolve aliases
-    canonical = SECTOR_ALIASES.get(sector, sector)
+    universe: list[UniverseStock] = []
+    for _, row in nifty500.iterrows():
+        ticker = str(row["Symbol"]).strip()
+        if not ticker or ticker == "nan":
+            continue
+        industry = str(row.get("Industry", "")).strip()
+        sector = overrides.get(ticker) or INDUSTRY_TO_SECTOR.get(industry) or industry or "Other"
+        cap_band = bands.get(ticker, "Mid")
+        universe.append(UniverseStock(ticker=ticker, sector=sector, cap_band=cap_band))
 
-    tickers = SECTOR_STOCKS.get(canonical)
-    if tickers:
-        return list(tickers), canonical
-
-    # Partial match: accept if the identified sector is a substring of a known key
-    for key in SECTOR_STOCKS:
-        if sector.lower() in key.lower() or key.lower() in sector.lower():
-            return list(SECTOR_STOCKS[key]), key
-
-    # Unknown sector — scan full Nifty500
-    tickers = fetch_nifty500_tickers()
-    return tickers, f"Broad Market — Nifty500 ({len(tickers)} stocks, unknown sector: {sector})"
-
-
-def fetch_nifty500_tickers() -> list[str]:
-    """
-    Downloads the live Nifty500 constituent list from NSE's public archive CSV.
-    No authentication required. Falls back to a hardcoded Nifty50 basket if
-    the download fails (network issue in CI, etc.).
-
-    NSE CSV columns: Company Name, Industry, Symbol, Series, ISIN Code
-    We only need the 'Symbol' column.
-    """
-    import io
-    import logging
-    import requests
-
-    logger = logging.getLogger(__name__)
-    url = "https://archives.nseindia.com/content/indices/ind_nifty500list.csv"
-    headers = {"User-Agent": "Mozilla/5.0 (compatible; StockScreener/1.0)"}
-
-    try:
-        resp = requests.get(url, headers=headers, timeout=15)
-        resp.raise_for_status()
-        import pandas as pd
-        df = pd.read_csv(io.StringIO(resp.text))
-        # Column is named 'Symbol' in NSE CSV
-        symbols = df["Symbol"].dropna().str.strip().tolist()
-        # Filter to equity series only (remove ETFs, etc. that sneak in)
-        symbols = [s for s in symbols if s.isalpha() or "&" in s or "-" in s]
-        logger.info("Nifty500 list fetched from NSE: %d symbols", len(symbols))
-        return symbols
-    except Exception as exc:
-        logger.warning("Failed to fetch Nifty500 from NSE (%s) — using hardcoded Nifty50 fallback", exc)
-        return _nifty50_fallback()
+    logger.info(
+        "Universe built: %d stocks across %d sectors", len(universe), len({u.sector for u in universe}),
+    )
+    return universe
 
 
-def _nifty50_fallback() -> list[str]:
-    """~500 hardcoded liquid NSE stocks — used only when NSE CSV download fails."""
-    from .stock_universe import _NIFTY50, _NIFTY_NEXT_50, _NIFTY_MIDCAP100, _NIFTY_SMALLCAP150
-    return _NIFTY50 + _NIFTY_NEXT_50 + _NIFTY_MIDCAP100 + _NIFTY_SMALLCAP150
+def group_by_sector(universe: list[UniverseStock]) -> dict[str, list[UniverseStock]]:
+    grouped: dict[str, list[UniverseStock]] = {}
+    for u in universe:
+        grouped.setdefault(u.sector, []).append(u)
+    return grouped

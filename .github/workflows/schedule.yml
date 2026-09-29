@@ -8,17 +8,15 @@ on:
 
   # Allow a manual trigger from the Actions tab (useful for testing).
   workflow_dispatch:
-    inputs:
-      manual_sector:
-        description: "Override sector (leave blank for auto-detection)"
-        required: false
-        default: ""
+
+permissions:
+  contents: write   # needed to commit the generated docs/ report back to the repo
 
 jobs:
   run-screener:
-    name: Run Sentiment Screener
+    name: Run Sector Rotation Screener
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
 
     steps:
       # ── 1. Checkout code ──────────────────────────────────────────────────
@@ -40,22 +38,35 @@ jobs:
       - name: Run screener
         env:
           # Secrets set in: GitHub repo → Settings → Secrets and variables → Actions
-          TWITTER_BEARER_TOKEN: ${{ secrets.TWITTER_BEARER_TOKEN }}
           SENDER_EMAIL:         ${{ secrets.SENDER_EMAIL }}
           SENDER_APP_PASSWORD:  ${{ secrets.SENDER_APP_PASSWORD }}
           RECEIVER_EMAIL:       ${{ secrets.RECEIVER_EMAIL }}
-          # Manual sector: prefer workflow_dispatch input, then secret fallback
-          MANUAL_SECTOR: >-
-            ${{
-              github.event.inputs.manual_sector != ''
-              && github.event.inputs.manual_sector
-              || secrets.MANUAL_SECTOR
-            }}
-          # NIFTY50 (50, fast) | NIFTY200 (200) | NIFTY500 (500, default) | NSE_ALL (1800+, ~15min)
-          SCAN_UNIVERSE: ${{ secrets.SCAN_UNIVERSE || 'NIFTY500' }}
+          TRADING_ACCOUNT_SIZE: ${{ secrets.TRADING_ACCOUNT_SIZE || '500000' }}
+          RISK_PCT_PER_TRADE:   ${{ secrets.RISK_PCT_PER_TRADE || '1.0' }}
+          # e.g. https://<user>.github.io/<repo> — used for the email's report link
+          PAGES_BASE_URL:       ${{ secrets.PAGES_BASE_URL }}
         run: python main.py
 
-      # ── 5. Upload logs on failure ─────────────────────────────────────────
+      # ── 5. Publish the generated report + commit the paper-trade log ──────
+      # paper_trades.csv is the ONLY persistent state this project has
+      # (see modules/paper_trade_log.py) — each Actions run starts from a
+      # fresh checkout, so this file MUST be committed back every run or the
+      # 3-month paper-trading log would silently reset to empty daily and
+      # check_exits() would never see a prior day's open positions.
+      - name: Commit + push docs/ report and paper trade log
+        if: success()
+        run: |
+          git config user.name "screener-bot"
+          git config user.email "actions@github.com"
+          git add docs paper_trades.csv
+          if ! git diff --cached --quiet; then
+            git commit -m "docs: publish screener report $(date -u +%Y-%m-%d)"
+            git push
+          else
+            echo "No changes under docs/ or paper_trades.csv — nothing to publish."
+          fi
+
+      # ── 6. Upload logs on failure ─────────────────────────────────────────
       - name: Upload log artifact on failure
         if: failure()
         uses: actions/upload-artifact@v4
