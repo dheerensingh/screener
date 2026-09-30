@@ -60,7 +60,9 @@ jobs:
         run: |
           git config user.name "screener-bot"
           git config user.email "actions@github.com"
-          git add docs paper_trades.csv
+          git add docs
+          # Only exists once the first trade has been logged.
+          if [ -f paper_trades.csv ]; then git add paper_trades.csv; fi
           if ! git diff --cached --quiet; then
             git commit -m "docs: publish screener report $(date -u +%Y-%m-%d)"
             git push
