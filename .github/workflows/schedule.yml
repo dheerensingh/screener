@@ -53,8 +53,10 @@ jobs:
       # fresh checkout, so this file MUST be committed back every run or the
       # 3-month paper-trading log would silently reset to empty daily and
       # check_exits() would never see a prior day's open positions.
+      # Runs even if the screener step failed (e.g. email not configured) — the
+      # report and paper-trade log are the product; email is just delivery.
       - name: Commit + push docs/ report and paper trade log
-        if: success()
+        if: success() || failure()
         run: |
           git config user.name "screener-bot"
           git config user.email "actions@github.com"
