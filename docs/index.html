@@ -3,614 +3,259 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Sector Screener Report — 01 Oct 2026</title>
+<title>Paper Trading Dashboard</title>
+<style>
+:root {
+  color-scheme: dark;
+  --page: #0d0d0d; --surface: #1a1a19; --ink: #ffffff; --ink-2: #c3c2b7; --muted: #898781;
+  --grid: #2c2c2a; --baseline: #383835; --border: rgba(255,255,255,0.10);
+  --series-1: #3987e5; --context: #898781; --gain: #3987e5; --loss: #e66767;
+  --good: #0ca30c; --critical: #e66767; --accent: #3987e5;
+}
+@media (prefers-color-scheme: light) {
+  :root {
+    color-scheme: light;
+    --page: #f9f9f7; --surface: #fcfcfb; --ink: #0b0b0b; --ink-2: #52514e; --muted: #898781;
+    --grid: #e1e0d9; --baseline: #c3c2b7; --border: rgba(11,11,11,0.10);
+    --series-1: #2a78d6; --context: #898781; --gain: #2a78d6; --loss: #e34948;
+    --good: #006300; --critical: #d03b3b; --accent: #2a78d6;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--page); color: var(--ink);
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif; font-size: 14px; line-height: 1.5; }
+.wrap { max-width: 1200px; margin: 0 auto; padding: 24px 16px 48px; }
+header { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-end; gap: 12px; margin-bottom: 20px; }
+h1 { font-size: 22px; margin: 0; }
+h2 { font-size: 15px; margin: 0 0 4px; }
+.sub, .muted { color: var(--muted); }
+nav { display: flex; flex-wrap: wrap; gap: 16px; }
+nav a { color: var(--accent); text-decoration: none; font-weight: 600; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 18px; margin-bottom: 16px; }
+.card-desc { color: var(--ink-2); margin: 0 0 12px; font-size: 13px; }
+.hero { display: flex; flex-wrap: wrap; gap: 24px; align-items: center; }
+.hero-value { font-size: 48px; font-weight: 650; letter-spacing: -0.5px; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; margin-bottom: 16px; }
+.tile { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px; }
+.tile-label { color: var(--ink-2); font-size: 12px; }
+.tile-value { font-size: 22px; font-weight: 600; margin: 2px 0; }
+.tile-sub { color: var(--muted); font-size: 12px; }
+.grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 16px; }
+.grid-2 .card { margin-bottom: 0; }
+.chart-box { position: relative; height: 300px; }
+.chart-box.tall { height: 520px; }
+.up { color: var(--good); } .down { color: var(--critical); } .flat { color: var(--ink-2); }
+.table-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th { text-align: left; font-weight: 600; color: var(--ink-2); font-size: 12px; padding: 8px 10px; border-bottom: 1px solid var(--baseline); white-space: nowrap; }
+td { padding: 8px 10px; border-bottom: 1px solid var(--grid); vertical-align: top; white-space: nowrap; }
+td.txt { white-space: normal; min-width: 180px; }
+th.num, td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.empty { color: var(--muted); margin: 8px 0; }
+details { margin-top: 10px; } summary { cursor: pointer; color: var(--accent); font-size: 13px; }
+.context { margin: 0; padding-left: 18px; color: var(--ink-2); }
+.legend { display: flex; gap: 16px; font-size: 12px; color: var(--ink-2); margin-bottom: 8px; }
+.key { display: inline-block; width: 14px; height: 2px; vertical-align: middle; margin-right: 6px; }
+.swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; vertical-align: middle; margin-right: 6px; }
+.note { color: var(--ink-2); font-size: 13px; }
+.note li { margin-bottom: 4px; }
+footer { color: var(--muted); font-size: 12px; margin-top: 24px; }
+</style>
 </head>
-<body style="margin:0;padding:0;background:#0f172a;font-family:'Segoe UI',Arial,sans-serif;
-             color:#e2e8f0">
-<div style="max-width:960px;margin:32px auto;padding:0 16px">
-
-  <div style="background:linear-gradient(135deg,#1e40af,#0369a1);border-radius:12px 12px 0 0;padding:24px 28px">
-    <h1 style="margin:0;font-size:22px">📊 Sector Rotation + Momentum Screener</h1>
-    <p style="margin:6px 0 0;color:#bae6fd;font-size:14px">
-      01 Oct 2026 · NSE India · Account size ₹500,000</p>
+<body>
+<div class="wrap">
+<header>
+  <div>
+    <h1>Paper Trading Dashboard</h1>
+    <div class="sub">NSE sector-rotation swing strategy · no real money · prices as of 2026-10-01 · updated 01 Oct 2026, 16:38 IST</div>
   </div>
+  <nav><a href="latest.html">Today's screening report</a><a href="reports/index.html">Archive</a><a href="data/paper_trades.csv">Trades CSV</a><a href="data/paper_equity.csv">Equity CSV</a></nav>
+</header>
 
-  <div style="background:#1e293b;padding:20px 28px;border-radius:0 0 8px 8px;
-              margin-bottom:20px">
-    <h2 style="margin:0 0 12px;font-size:14px;text-transform:uppercase;letter-spacing:1px;
-               color:#94a3b8">Sector Rotation Ranking</h2>
-    <table style="width:100%;border-collapse:collapse;font-size:13px">
-      <thead>
-        <tr style="text-transform:uppercase;font-size:10px;letter-spacing:0.6px;color:#94a3b8">
-          <th style="padding:8px 14px;text-align:left">Rank</th>
-          <th style="padding:8px 14px;text-align:left">Sector</th>
-          <th style="padding:8px 14px;text-align:right"># Stocks</th>
-          <th style="padding:8px 14px;text-align:right">Composite RS</th>
-          <th style="padding:8px 14px;text-align:right">1M RS</th>
-          <th style="padding:8px 14px;text-align:right">3M RS</th>
-          <th style="padding:8px 14px;text-align:right">6M RS</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr style="background:#1e293b;border-left:3px solid #38bdf8">
-          <td style="padding:8px 14px">1  ★</td>
-          <td style="padding:8px 14px;font-weight:600">Telecom</td>
-          <td style="padding:8px 14px;text-align:right;font-size:12px;color:#94a3b8">8</td>
-          <td style="padding:8px 14px;text-align:right;color:#4ade80;font-weight:700">+37.9</td>
-          <td style="padding:8px 14px;text-align:right;font-size:12px;color:#94a3b8">
-              +16.6%</td>
-          <td style="padding:8px 14px;text-align:right;font-size:12px;color:#94a3b8">
-              +23.0%</td>
-          <td style="padding:8px 14px;text-align:right;font-size:12px;color:#94a3b8">
-              +113.5%</td>
-        </tr>
-
-        <tr style="background:#1e293b;border-left:3px solid #38bdf8">
-          <td style="padding:8px 14px">2  ★</td>
-          <td style="padding:8px 14px;font-weight:600">Capital Goods</td>
-          <td style="padding:8px 14px;text-align:right;font-size:12px;color:#94a3b8">40</td>
-          <td style="padding:8px 14px;text-align:right;color:#4ade80;font-weight:700">+12.5</td>
-          <td style="padding:8px 14px;text-align:right;font-size:12px;color:#94a3b8">
-              +5.7%</td>
-          <td style="padding:8px 14px;text-align:right;font-size:12px;color:#94a3b8">
-              +12.5%</td>
-          <td style="padding:8px 14px;text-align:right;font-size:12px;color:#94a3b8">
-              +29.5%</td>
-        </tr>
-
-        <tr style="background:#1e293b;border-left:3px solid #38bdf8">
-          <td style="padding:8px 14px">3  ★</td>
-          <td style="padding:8px 14px;font-weight:600">Media Entertainment & Publication</td>
-          <td style="padding:8px 14px;text-align:right;font-size:12px;color:#94a3b8">4</td>
-          <td style="padding:8px 14px;text-align:right;color:#4ade80;font-weight:700">+10.1</td>
-          <td style="padding:8px 14px;text-align:right;font-size:12px;color:#94a3b8">
-              +11.4%</td>
-          <td style="padding:8px 14px;text-align:right;font-size:12px;color:#94a3b8">
-              +18.1%</td>
-          <td style="padding:8px 14px;text-align:right;font-size:12px;color:#94a3b8">
-              -5.3%</td>
-        </tr>
-
-        <tr style="background:#1e293b;border-left:3px solid #38bdf8">
-          <td style="padding:8px 14px">4  ★</td>
-          <td style="padding:8px 14px;font-weight:600">Pharma</td>
-          <td style="padding:8px 14px;text-align:right;font-size:12px;color:#94a3b8">40</td>
-          <td style="padding:8px 14px;text-align:right;color:#4ade80;font-weight:700">+9.2</td>
-          <td style="padding:8px 14px;text-align:right;font-size:12px;color:#94a3b8">
-              +3.8%</td>
-          <td style="padding:8px 14px;text-align:right;font-size:12px;color:#94a3b8">
-              +8.9%</td>
-          <td style="padding:8px 14px;text-align:right;font-size:12px;color:#94a3b8">
-              +23.0%</td>
-        </tr>
-
-        <tr style="border-left:3px solid transparent">
-          <td style="padding:8px 14px">5</td>
-          <td style="padding:8px 14px;font-weight:600">Textiles</td>
-          <td style="padding:8px 14px;text-align:right;font-size:12px;color:#94a3b8">5</td>
-          <td style="padding:8px 14px;text-align:right;color:#4ade80;font-weight:700">+8.6</td>
-          <td style="padding:8px 14px;text-align:right;font-size:12px;color:#94a3b8">
-              +7.0%</td>
-          <td style="padding:8px 14px;text-align:right;font-size:12px;color:#94a3b8">
-              +4.6%</td>
-          <td style="padding:8px 14px;text-align:right;font-size:12px;color:#94a3b8">
-              +18.5%</td>
-        </tr>
-
-        <tr style="border-left:3px solid transparent">
-          <td style="padding:8px 14px">6</td>
-          <td style="padding:8px 14px;font-weight:600">FMCG</td>
-          <td style="padding:8px 14px;text-align:right;font-size:12px;color:#94a3b8">28</td>
-          <td style="padding:8px 14px;text-align:right;color:#4ade80;font-weight:700">+5.9</td>
-          <td style="padding:8px 14px;text-align:right;font-size:12px;color:#94a3b8">
-              +4.2%</td>
-          <td style="padding:8px 14px;text-align:right;font-size:12px;color:#94a3b8">
-              +4.8%</td>
-          <td style="padding:8px 14px;text-align:right;font-size:12px;color:#94a3b8">
-              +12.0%</td>
-        </tr>
-
-        <tr style="border-left:3px solid transparent">
-          <td style="padding:8px 14px">7</td>
-          <td style="padding:8px 14px;font-weight:600">Services</td>
-          <td style="padding:8px 14px;text-align:right;font-size:12px;color:#94a3b8">11</td>
-          <td style="padding:8px 14px;text-align:right;color:#4ade80;font-weight:700">+5.2</td>
-          <td style="padding:8px 14px;text-align:right;font-size:12px;color:#94a3b8">
-              +4.4%</td>
-          <td style="padding:8px 14px;text-align:right;font-size:12px;color:#94a3b8">
-              +2.3%</td>
-          <td style="padding:8px 14px;text-align:right;font-size:12px;color:#94a3b8">
-              +11.6%</td>
-        </tr>
-
-        <tr style="border-left:3px solid transparent">
-          <td style="padding:8px 14px">8</td>
-          <td style="padding:8px 14px;font-weight:600">Consumer Services</td>
-          <td style="padding:8px 14px;text-align:right;font-size:12px;color:#94a3b8">21</td>
-          <td style="padding:8px 14px;text-align:right;color:#4ade80;font-weight:700">+4.9</td>
-          <td style="padding:8px 14px;text-align:right;font-size:12px;color:#94a3b8">
-              +3.0%</td>
-          <td style="padding:8px 14px;text-align:right;font-size:12px;color:#94a3b8">
-              +6.5%</td>
-          <td style="padding:8px 14px;text-align:right;font-size:12px;color:#94a3b8">
-              +7.4%</td>
-        </tr>
-
-        <tr style="border-left:3px solid transparent">
-          <td style="padding:8px 14px">9</td>
-          <td style="padding:8px 14px;font-weight:600">Defense</td>
-          <td style="padding:8px 14px;text-align:right;font-size:12px;color:#94a3b8">12</td>
-          <td style="padding:8px 14px;text-align:right;color:#4ade80;font-weight:700">+4.6</td>
-          <td style="padding:8px 14px;text-align:right;font-size:12px;color:#94a3b8">
-              +1.9%</td>
-          <td style="padding:8px 14px;text-align:right;font-size:12px;color:#94a3b8">
-              +0.4%</td>
-          <td style="padding:8px 14px;text-align:right;font-size:12px;color:#94a3b8">
-              +17.9%</td>
-        </tr>
-
-        <tr style="border-left:3px solid transparent">
-          <td style="padding:8px 14px">10</td>
-          <td style="padding:8px 14px;font-weight:600">Auto</td>
-          <td style="padding:8px 14px;text-align:right;font-size:12px;color:#94a3b8">38</td>
-          <td style="padding:8px 14px;text-align:right;color:#4ade80;font-weight:700">+4.4</td>
-          <td style="padding:8px 14px;text-align:right;font-size:12px;color:#94a3b8">
-              +0.6%</td>
-          <td style="padding:8px 14px;text-align:right;font-size:12px;color:#94a3b8">
-              +5.6%</td>
-          <td style="padding:8px 14px;text-align:right;font-size:12px;color:#94a3b8">
-              +11.8%</td>
-        </tr>
-
-        <tr style="border-left:3px solid transparent">
-          <td style="padding:8px 14px">11</td>
-          <td style="padding:8px 14px;font-weight:600">Energy</td>
-          <td style="padding:8px 14px;text-align:right;font-size:12px;color:#94a3b8">24</td>
-          <td style="padding:8px 14px;text-align:right;color:#4ade80;font-weight:700">+3.6</td>
-          <td style="padding:8px 14px;text-align:right;font-size:12px;color:#94a3b8">
-              +3.9%</td>
-          <td style="padding:8px 14px;text-align:right;font-size:12px;color:#94a3b8">
-              +0.4%</td>
-          <td style="padding:8px 14px;text-align:right;font-size:12px;color:#94a3b8">
-              +7.7%</td>
-        </tr>
-
-        <tr style="border-left:3px solid transparent">
-          <td style="padding:8px 14px">12</td>
-          <td style="padding:8px 14px;font-weight:600">Chemicals</td>
-          <td style="padding:8px 14px;text-align:right;font-size:12px;color:#94a3b8">25</td>
-          <td style="padding:8px 14px;text-align:right;color:#4ade80;font-weight:700">+1.9</td>
-          <td style="padding:8px 14px;text-align:right;font-size:12px;color:#94a3b8">
-              +1.2%</td>
-          <td style="padding:8px 14px;text-align:right;font-size:12px;color:#94a3b8">
-              +1.0%</td>
-          <td style="padding:8px 14px;text-align:right;font-size:12px;color:#94a3b8">
-              +4.7%</td>
-        </tr>
-
-        <tr style="border-left:3px solid transparent">
-          <td style="padding:8px 14px">13</td>
-          <td style="padding:8px 14px;font-weight:600">Construction</td>
-          <td style="padding:8px 14px;text-align:right;font-size:12px;color:#94a3b8">9</td>
-          <td style="padding:8px 14px;text-align:right;color:#4ade80;font-weight:700">+1.8</td>
-          <td style="padding:8px 14px;text-align:right;font-size:12px;color:#94a3b8">
-              +3.0%</td>
-          <td style="padding:8px 14px;text-align:right;font-size:12px;color:#94a3b8">
-              -4.0%</td>
-          <td style="padding:8px 14px;text-align:right;font-size:12px;color:#94a3b8">
-              +7.4%</td>
-        </tr>
-
-        <tr style="border-left:3px solid transparent">
-          <td style="padding:8px 14px">14</td>
-          <td style="padding:8px 14px;font-weight:600">Infrastructure</td>
-          <td style="padding:8px 14px;text-align:right;font-size:12px;color:#94a3b8">22</td>
-          <td style="padding:8px 14px;text-align:right;color:#4ade80;font-weight:700">+0.6</td>
-          <td style="padding:8px 14px;text-align:right;font-size:12px;color:#94a3b8">
-              +1.5%</td>
-          <td style="padding:8px 14px;text-align:right;font-size:12px;color:#94a3b8">
-              -2.6%</td>
-          <td style="padding:8px 14px;text-align:right;font-size:12px;color:#94a3b8">
-              +3.3%</td>
-        </tr>
-
-        <tr style="border-left:3px solid transparent">
-          <td style="padding:8px 14px">15</td>
-          <td style="padding:8px 14px;font-weight:600">IT</td>
-          <td style="padding:8px 14px;text-align:right;font-size:12px;color:#94a3b8">25</td>
-          <td style="padding:8px 14px;text-align:right;color:#4ade80;font-weight:700">+0.3</td>
-          <td style="padding:8px 14px;text-align:right;font-size:12px;color:#94a3b8">
-              -1.4%</td>
-          <td style="padding:8px 14px;text-align:right;font-size:12px;color:#94a3b8">
-              +4.8%</td>
-          <td style="padding:8px 14px;text-align:right;font-size:12px;color:#94a3b8">
-              -2.3%</td>
-        </tr>
-
-        <tr style="border-left:3px solid transparent">
-          <td style="padding:8px 14px">16</td>
-          <td style="padding:8px 14px;font-weight:600">Consumer Durables</td>
-          <td style="padding:8px 14px;text-align:right;font-size:12px;color:#94a3b8">16</td>
-          <td style="padding:8px 14px;text-align:right;color:#f87171;font-weight:700">-0.5</td>
-          <td style="padding:8px 14px;text-align:right;font-size:12px;color:#94a3b8">
-              -0.8%</td>
-          <td style="padding:8px 14px;text-align:right;font-size:12px;color:#94a3b8">
-              -2.0%</td>
-          <td style="padding:8px 14px;text-align:right;font-size:12px;color:#94a3b8">
-              +2.5%</td>
-        </tr>
-
-        <tr style="border-left:3px solid transparent">
-          <td style="padding:8px 14px">17</td>
-          <td style="padding:8px 14px;font-weight:600">Banking</td>
-          <td style="padding:8px 14px;text-align:right;font-size:12px;color:#94a3b8">40</td>
-          <td style="padding:8px 14px;text-align:right;color:#f87171;font-weight:700">-0.6</td>
-          <td style="padding:8px 14px;text-align:right;font-size:12px;color:#94a3b8">
-              -1.5%</td>
-          <td style="padding:8px 14px;text-align:right;font-size:12px;color:#94a3b8">
-              -0.6%</td>
-          <td style="padding:8px 14px;text-align:right;font-size:12px;color:#94a3b8">
-              +1.8%</td>
-        </tr>
-
-        <tr style="border-left:3px solid transparent">
-          <td style="padding:8px 14px">18</td>
-          <td style="padding:8px 14px;font-weight:600">PSU</td>
-          <td style="padding:8px 14px;text-align:right;font-size:12px;color:#94a3b8">17</td>
-          <td style="padding:8px 14px;text-align:right;color:#f87171;font-weight:700">-1.8</td>
-          <td style="padding:8px 14px;text-align:right;font-size:12px;color:#94a3b8">
-              -0.2%</td>
-          <td style="padding:8px 14px;text-align:right;font-size:12px;color:#94a3b8">
-              +0.4%</td>
-          <td style="padding:8px 14px;text-align:right;font-size:12px;color:#94a3b8">
-              -9.0%</td>
-        </tr>
-
-        <tr style="border-left:3px solid transparent">
-          <td style="padding:8px 14px">19</td>
-          <td style="padding:8px 14px;font-weight:600">Real Estate</td>
-          <td style="padding:8px 14px;text-align:right;font-size:12px;color:#94a3b8">12</td>
-          <td style="padding:8px 14px;text-align:right;color:#f87171;font-weight:700">-2.0</td>
-          <td style="padding:8px 14px;text-align:right;font-size:12px;color:#94a3b8">
-              -2.3%</td>
-          <td style="padding:8px 14px;text-align:right;font-size:12px;color:#94a3b8">
-              -3.9%</td>
-          <td style="padding:8px 14px;text-align:right;font-size:12px;color:#94a3b8">
-              +1.7%</td>
-        </tr>
-
-        <tr style="border-left:3px solid transparent">
-          <td style="padding:8px 14px">20</td>
-          <td style="padding:8px 14px;font-weight:600">Railways</td>
-          <td style="padding:8px 14px;text-align:right;font-size:12px;color:#94a3b8">7</td>
-          <td style="padding:8px 14px;text-align:right;color:#f87171;font-weight:700">-2.8</td>
-          <td style="padding:8px 14px;text-align:right;font-size:12px;color:#94a3b8">
-              +2.4%</td>
-          <td style="padding:8px 14px;text-align:right;font-size:12px;color:#94a3b8">
-              -5.3%</td>
-          <td style="padding:8px 14px;text-align:right;font-size:12px;color:#94a3b8">
-              -12.3%</td>
-        </tr>
-
-        <tr style="border-left:3px solid transparent">
-          <td style="padding:8px 14px">21</td>
-          <td style="padding:8px 14px;font-weight:600">Diversified</td>
-          <td style="padding:8px 14px;text-align:right;font-size:12px;color:#94a3b8">1</td>
-          <td style="padding:8px 14px;text-align:right;color:#f87171;font-weight:700">-3.2</td>
-          <td style="padding:8px 14px;text-align:right;font-size:12px;color:#94a3b8">
-              -5.0%</td>
-          <td style="padding:8px 14px;text-align:right;font-size:12px;color:#94a3b8">
-              -10.3%</td>
-          <td style="padding:8px 14px;text-align:right;font-size:12px;color:#94a3b8">
-              +12.1%</td>
-        </tr>
-
-        <tr style="border-left:3px solid transparent">
-          <td style="padding:8px 14px">22</td>
-          <td style="padding:8px 14px;font-weight:600">Metals</td>
-          <td style="padding:8px 14px;text-align:right;font-size:12px;color:#94a3b8">17</td>
-          <td style="padding:8px 14px;text-align:right;color:#f87171;font-weight:700">-3.3</td>
-          <td style="padding:8px 14px;text-align:right;font-size:12px;color:#94a3b8">
-              -0.8%</td>
-          <td style="padding:8px 14px;text-align:right;font-size:12px;color:#94a3b8">
-              -1.5%</td>
-          <td style="padding:8px 14px;text-align:right;font-size:12px;color:#94a3b8">
-              -12.4%</td>
-        </tr>
-
-        <tr style="border-left:3px solid transparent">
-          <td style="padding:8px 14px">23</td>
-          <td style="padding:8px 14px;font-weight:600">Construction Materials</td>
-          <td style="padding:8px 14px;text-align:right;font-size:12px;color:#94a3b8">9</td>
-          <td style="padding:8px 14px;text-align:right;color:#f87171;font-weight:700">-5.4</td>
-          <td style="padding:8px 14px;text-align:right;font-size:12px;color:#94a3b8">
-              -0.8%</td>
-          <td style="padding:8px 14px;text-align:right;font-size:12px;color:#94a3b8">
-              -7.0%</td>
-          <td style="padding:8px 14px;text-align:right;font-size:12px;color:#94a3b8">
-              -14.8%</td>
-        </tr></tbody>
-    </table>
-    <p style="margin:12px 0 0;font-size:11px;color:#94a3b8">
-      ★ = leading sector(s), screened for momentum stocks below. RS = relative strength
-      vs the Nifty500 benchmark (synthetic sector index — see CLAUDE.md for methodology).
-    </p>
-  </div>
-
-  
-    <div style="background:#1e293b;padding:16px 28px;border-radius:8px;margin-bottom:20px;
-                font-size:13px;color:#94a3b8">
-      <h2 style="margin:0 0 8px;font-size:14px;text-transform:uppercase;letter-spacing:1px;
-                 color:#94a3b8">Market Context</h2>
-      <p style="margin:4px 0">Market regime: <strong style="color:#e2e8f0">price <= 200d SMA (21789.2 vs 22957.4); SMA 21d RoC -0.49% (below 1.0% threshold); breadth 15% of universe above own 50d SMA (informational only) — not in a clean uptrend, new entries paused</strong></p>
-      <p style="margin:4px 0">FII/DII net flow (30-Sep-2026, <em>informational, not backtested</em>): FII <span style="color:#f87171;font-weight:700">₹-10,148 cr</span>, DII <span style="color:#4ade80;font-weight:700">₹+11,272 cr</span></p>
-    </div>
-
-  
-    <div style="background:#1e293b;margin-top:20px;border-radius:8px;overflow:hidden;
-                border:1px solid #334155">
-      <div style="padding:16px 20px;border-bottom:1px solid #334155">
-        <h2 style="margin:0;font-size:18px;color:#38bdf8">Telecom</h2>
-        <p style="margin:6px 0 0;font-size:12px;color:#94a3b8">
-          Fundamental confirmation: <strong style="color:#e2e8f0">3/7 stocks grew profit YoY</strong>
-        </p>
-        <p style="margin:6px 0 0;font-size:11px;color:#94a3b8"><span style="margin-right:10px">IDEA: -43% YoY</span><span style="margin-right:10px">TEJASNET: +4% YoY</span><span style="margin-right:10px">STLTECH: +1870% YoY</span><span style="margin-right:10px">HFCL: -948% YoY</span><span style="margin-right:10px">TATACOMM: -32% YoY</span><span style="margin-right:10px">TTML: +64% YoY</span><span style="margin-right:10px">BHARTIHEXA: n/a</span><span style="margin-right:10px">ITI: -50% YoY</span></p>
-        <p style="margin:6px 0 0;font-size:12px;color:#94a3b8">
-          Governance check: <strong style="color:#e2e8f0">0/2 flagged for promoter pledge</strong>
-        </p>
-        <p style="margin:6px 0 0;font-size:11px;color:#94a3b8"><span style="margin-right:10px">STLTECH: promoter 42.3%, <span style="color:#fbbf24">declining (-2.2pp YoY)</span></span><span style="margin-right:10px">HFCL: promoter 28.3%, <span style="color:#fbbf24">declining (-3.3pp YoY)</span></span></p>
-      </div>
-      <table style="width:100%;border-collapse:collapse;font-size:13px">
-        <thead>
-          <tr style="background:#0f172a;text-transform:uppercase;font-size:10px;
-                     letter-spacing:0.6px;color:#94a3b8">
-            <th style="padding:8px 14px;text-align:left">Ticker</th>
-            <th style="padding:8px 14px;text-align:right">Entry</th>
-            <th style="padding:8px 14px;text-align:right">RSI</th>
-            <th style="padding:8px 14px;text-align:left">Signals</th>
-            <th style="padding:8px 14px;text-align:right">Stop</th>
-            <th style="padding:8px 14px;text-align:right">Qty</th>
-            <th style="padding:8px 14px;text-align:right">₹ Alloc</th>
-            <th style="padding:8px 14px;text-align:right">% Capital</th>
-            <th style="padding:8px 14px;text-align:left">Sizing formula</th>
-          </tr>
-        </thead>
-        <tbody>
-        <tr style="border-bottom:1px solid #334155">
-          <td style="padding:10px 14px;font-weight:600;color:#38bdf8">STLTECH<br>
-              <span style="font-weight:400;font-size:10px;color:#f87171">Small Cap</span></td>
-          <td style="padding:10px 14px;text-align:right">₹955.35</td>
-          <td style="padding:10px 14px;text-align:right">71.8</td>
-          <td style="padding:10px 14px"><span style="background:#334155;border-radius:4px;padding:2px 6px;font-size:10px;margin-right:4px">Vol↑</span> <span style="background:#334155;border-radius:4px;padding:2px 6px;font-size:10px;margin-right:4px">Near 52w High</span> <span style="background:#334155;border-radius:4px;padding:2px 6px;font-size:10px;margin-right:4px">RS > Sector</span></td>
-          <td style="padding:10px 14px;text-align:right">₹nan</td>
-          <td style="padding:10px 14px;text-align:right">0</td>
-          <td style="padding:10px 14px;text-align:right">₹0</td>
-          <td style="padding:10px 14px;text-align:right;font-weight:700">0.0%</td>
-          <td style="padding:10px 14px;font-size:10px;color:#94a3b8;max-width:260px">n/a</td>
-        </tr>
-
-        <tr style="border-bottom:1px solid #334155">
-          <td style="padding:10px 14px;font-weight:600;color:#38bdf8">HFCL<br>
-              <span style="font-weight:400;font-size:10px;color:#f87171">Small Cap</span></td>
-          <td style="padding:10px 14px;text-align:right">₹238.30</td>
-          <td style="padding:10px 14px;text-align:right">59.0</td>
-          <td style="padding:10px 14px"><span style="background:#334155;border-radius:4px;padding:2px 6px;font-size:10px;margin-right:4px">Vol↑</span></td>
-          <td style="padding:10px 14px;text-align:right">₹nan</td>
-          <td style="padding:10px 14px;text-align:right">0</td>
-          <td style="padding:10px 14px;text-align:right">₹0</td>
-          <td style="padding:10px 14px;text-align:right;font-weight:700">0.0%</td>
-          <td style="padding:10px 14px;font-size:10px;color:#94a3b8;max-width:260px">n/a</td>
-        </tr></tbody>
-      </table>
-    </div>
-
-    <div style="background:#1e293b;margin-top:20px;border-radius:8px;overflow:hidden;
-                border:1px solid #334155">
-      <div style="padding:16px 20px;border-bottom:1px solid #334155">
-        <h2 style="margin:0;font-size:18px;color:#38bdf8">Capital Goods</h2>
-        <p style="margin:6px 0 0;font-size:12px;color:#94a3b8">
-          Fundamental confirmation: <strong style="color:#e2e8f0">26/38 stocks grew profit YoY</strong>
-        </p>
-        <p style="margin:6px 0 0;font-size:11px;color:#94a3b8"><span style="margin-right:10px">WELCORP: +200% YoY</span><span style="margin-right:10px">SYRMA: +112% YoY</span><span style="margin-right:10px">KAYNES: -25% YoY</span><span style="margin-right:10px">POLYCAB: +33% YoY</span><span style="margin-right:10px">POWERINDIA: n/a</span><span style="margin-right:10px">GRAPHITE: +29% YoY</span><span style="margin-right:10px">KEI: +40% YoY</span><span style="margin-right:10px">AZAD: +21% YoY</span><span style="margin-right:10px">TMCV: +83% YoY</span><span style="margin-right:10px">APARINDS: +78% YoY</span><span style="margin-right:10px">HBLENGINE: -24% YoY</span><span style="margin-right:10px">TDPOWERSYS: +72% YoY</span><span style="margin-right:10px">TEGA: -409% YoY</span><span style="margin-right:10px">FINCABLES: +53% YoY</span><span style="margin-right:10px">KIRLOSENG: -20% YoY</span><span style="margin-right:10px">WAAREEENER: +15% YoY</span><span style="margin-right:10px">ENRIN: n/a</span><span style="margin-right:10px">APLAPOLLO: +11% YoY</span><span style="margin-right:10px">ABB: +3% YoY</span><span style="margin-right:10px">JYOTICNC: -20% YoY</span><span style="margin-right:10px">RRKABEL: +128% YoY</span><span style="margin-right:10px">PREMIERENE: +53% YoY</span><span style="margin-right:10px">ELECON: -60% YoY</span><span style="margin-right:10px">SIEMENS: +407% YoY</span><span style="margin-right:10px">CPPLUS: +330% YoY</span><span style="margin-right:10px">TARIL: -4% YoY</span><span style="margin-right:10px">EMMVEE: +102% YoY</span><span style="margin-right:10px">ASTRAL: +52% YoY</span><span style="margin-right:10px">INOXWIND: -34% YoY</span><span style="margin-right:10px">CARBORUNIV: +33% YoY</span><span style="margin-right:10px">INOXINDIA: -5% YoY</span><span style="margin-right:10px">THERMAX: -85% YoY</span><span style="margin-right:10px">SHYAMMETL: +21% YoY</span><span style="margin-right:10px">PTCIL: +480% YoY</span><span style="margin-right:10px">USHAMART: +41% YoY</span><span style="margin-right:10px">SUPREMEIND: +39% YoY</span><span style="margin-right:10px">HEGAM: +16% YoY</span><span style="margin-right:10px">JINDALSAW: -78% YoY</span><span style="margin-right:10px">JWL: -16% YoY</span><span style="margin-right:10px">ACE: +21% YoY</span></p>
-        <p style="margin:6px 0 0;font-size:12px;color:#94a3b8">
-          Governance check: <strong style="color:#e2e8f0">0/5 flagged for promoter pledge</strong>
-        </p>
-        <p style="margin:6px 0 0;font-size:11px;color:#94a3b8"><span style="margin-right:10px">TDPOWERSYS: promoter 26.9%</span><span style="margin-right:10px">CPPLUS: promoter 74.7%</span><span style="margin-right:10px">CARBORUNIV: promoter 38.9%</span><span style="margin-right:10px">SYRMA: promoter 42.3%, <span style="color:#fbbf24">declining (-4.1pp YoY)</span></span><span style="margin-right:10px">AZAD: promoter 55.8%</span></p>
-      </div>
-      <table style="width:100%;border-collapse:collapse;font-size:13px">
-        <thead>
-          <tr style="background:#0f172a;text-transform:uppercase;font-size:10px;
-                     letter-spacing:0.6px;color:#94a3b8">
-            <th style="padding:8px 14px;text-align:left">Ticker</th>
-            <th style="padding:8px 14px;text-align:right">Entry</th>
-            <th style="padding:8px 14px;text-align:right">RSI</th>
-            <th style="padding:8px 14px;text-align:left">Signals</th>
-            <th style="padding:8px 14px;text-align:right">Stop</th>
-            <th style="padding:8px 14px;text-align:right">Qty</th>
-            <th style="padding:8px 14px;text-align:right">₹ Alloc</th>
-            <th style="padding:8px 14px;text-align:right">% Capital</th>
-            <th style="padding:8px 14px;text-align:left">Sizing formula</th>
-          </tr>
-        </thead>
-        <tbody>
-        <tr style="border-bottom:1px solid #334155">
-          <td style="padding:10px 14px;font-weight:600;color:#38bdf8">TDPOWERSYS<br>
-              <span style="font-weight:400;font-size:10px;color:#f87171">Small Cap</span></td>
-          <td style="padding:10px 14px;text-align:right">₹791.95</td>
-          <td style="padding:10px 14px;text-align:right">58.0</td>
-          <td style="padding:10px 14px"><span style="background:#334155;border-radius:4px;padding:2px 6px;font-size:10px;margin-right:4px">Vol↑</span> <span style="background:#334155;border-radius:4px;padding:2px 6px;font-size:10px;margin-right:4px">Near 52w High</span> <span style="background:#334155;border-radius:4px;padding:2px 6px;font-size:10px;margin-right:4px">RS > Sector</span></td>
-          <td style="padding:10px 14px;text-align:right">₹nan</td>
-          <td style="padding:10px 14px;text-align:right">0</td>
-          <td style="padding:10px 14px;text-align:right">₹0</td>
-          <td style="padding:10px 14px;text-align:right;font-weight:700">0.0%</td>
-          <td style="padding:10px 14px;font-size:10px;color:#94a3b8;max-width:260px">n/a</td>
-        </tr>
-
-        <tr style="border-bottom:1px solid #334155">
-          <td style="padding:10px 14px;font-weight:600;color:#38bdf8">CPPLUS<br>
-              <span style="font-weight:400;font-size:10px;color:#f87171">Small Cap</span></td>
-          <td style="padding:10px 14px;text-align:right">₹3,790.40</td>
-          <td style="padding:10px 14px;text-align:right">55.3</td>
-          <td style="padding:10px 14px"><span style="background:#334155;border-radius:4px;padding:2px 6px;font-size:10px;margin-right:4px">RS > Sector</span> <span style="background:#334155;border-radius:4px;padding:2px 6px;font-size:10px;margin-right:4px">Delivery 56%</span></td>
-          <td style="padding:10px 14px;text-align:right">₹nan</td>
-          <td style="padding:10px 14px;text-align:right">0</td>
-          <td style="padding:10px 14px;text-align:right">₹0</td>
-          <td style="padding:10px 14px;text-align:right;font-weight:700">0.0%</td>
-          <td style="padding:10px 14px;font-size:10px;color:#94a3b8;max-width:260px">n/a</td>
-        </tr>
-
-        <tr style="border-bottom:1px solid #334155">
-          <td style="padding:10px 14px;font-weight:600;color:#38bdf8">CARBORUNIV<br>
-              <span style="font-weight:400;font-size:10px;color:#f87171">Small Cap</span></td>
-          <td style="padding:10px 14px;text-align:right">₹1,237.30</td>
-          <td style="padding:10px 14px;text-align:right">59.6</td>
-          <td style="padding:10px 14px"><span style="background:#334155;border-radius:4px;padding:2px 6px;font-size:10px;margin-right:4px">RS > Sector</span></td>
-          <td style="padding:10px 14px;text-align:right">₹nan</td>
-          <td style="padding:10px 14px;text-align:right">0</td>
-          <td style="padding:10px 14px;text-align:right">₹0</td>
-          <td style="padding:10px 14px;text-align:right;font-weight:700">0.0%</td>
-          <td style="padding:10px 14px;font-size:10px;color:#94a3b8;max-width:260px">n/a</td>
-        </tr>
-
-        <tr style="border-bottom:1px solid #334155">
-          <td style="padding:10px 14px;font-weight:600;color:#38bdf8">SYRMA<br>
-              <span style="font-weight:400;font-size:10px;color:#f87171">Small Cap</span></td>
-          <td style="padding:10px 14px;text-align:right">₹1,720.10</td>
-          <td style="padding:10px 14px;text-align:right">59.2</td>
-          <td style="padding:10px 14px"><span style="background:#334155;border-radius:4px;padding:2px 6px;font-size:10px;margin-right:4px">RS > Sector</span></td>
-          <td style="padding:10px 14px;text-align:right">₹nan</td>
-          <td style="padding:10px 14px;text-align:right">0</td>
-          <td style="padding:10px 14px;text-align:right">₹0</td>
-          <td style="padding:10px 14px;text-align:right;font-weight:700">0.0%</td>
-          <td style="padding:10px 14px;font-size:10px;color:#94a3b8;max-width:260px">n/a</td>
-        </tr>
-
-        <tr style="border-bottom:1px solid #334155">
-          <td style="padding:10px 14px;font-weight:600;color:#38bdf8">AZAD<br>
-              <span style="font-weight:400;font-size:10px;color:#f87171">Small Cap</span></td>
-          <td style="padding:10px 14px;text-align:right">₹2,864.00</td>
-          <td style="padding:10px 14px;text-align:right">56.3</td>
-          <td style="padding:10px 14px"><span style="background:#334155;border-radius:4px;padding:2px 6px;font-size:10px;margin-right:4px">RS > Sector</span></td>
-          <td style="padding:10px 14px;text-align:right">₹nan</td>
-          <td style="padding:10px 14px;text-align:right">0</td>
-          <td style="padding:10px 14px;text-align:right">₹0</td>
-          <td style="padding:10px 14px;text-align:right;font-weight:700">0.0%</td>
-          <td style="padding:10px 14px;font-size:10px;color:#94a3b8;max-width:260px">n/a</td>
-        </tr></tbody>
-      </table>
-    </div>
-
-    <div style="background:#1e293b;margin-top:20px;border-radius:8px;overflow:hidden;
-                border:1px solid #334155">
-      <div style="padding:16px 20px;border-bottom:1px solid #334155">
-        <h2 style="margin:0;font-size:18px;color:#38bdf8">Media Entertainment & Publication</h2>
-        <p style="margin:6px 0 0;font-size:12px;color:#94a3b8">
-          Fundamental confirmation: <strong style="color:#e2e8f0">1/4 stocks grew profit YoY</strong>
-        </p>
-        <p style="margin:6px 0 0;font-size:11px;color:#94a3b8"><span style="margin-right:10px">SUNTV: +17% YoY</span><span style="margin-right:10px">ZEEL: -49% YoY</span><span style="margin-right:10px">PFOCUS: -142% YoY</span><span style="margin-right:10px">PVRINOX: -204% YoY</span></p>
-        <p style="margin:6px 0 0;font-size:12px;color:#94a3b8">
-          Governance check: <strong style="color:#e2e8f0">No qualifiers to check</strong>
-        </p>
-        <p style="margin:6px 0 0;font-size:11px;color:#94a3b8"></p>
-      </div>
-      <table style="width:100%;border-collapse:collapse;font-size:13px">
-        <thead>
-          <tr style="background:#0f172a;text-transform:uppercase;font-size:10px;
-                     letter-spacing:0.6px;color:#94a3b8">
-            <th style="padding:8px 14px;text-align:left">Ticker</th>
-            <th style="padding:8px 14px;text-align:right">Entry</th>
-            <th style="padding:8px 14px;text-align:right">RSI</th>
-            <th style="padding:8px 14px;text-align:left">Signals</th>
-            <th style="padding:8px 14px;text-align:right">Stop</th>
-            <th style="padding:8px 14px;text-align:right">Qty</th>
-            <th style="padding:8px 14px;text-align:right">₹ Alloc</th>
-            <th style="padding:8px 14px;text-align:right">% Capital</th>
-            <th style="padding:8px 14px;text-align:left">Sizing formula</th>
-          </tr>
-        </thead>
-        <tbody><tr><td colspan="9" style="text-align:center;padding:20px;color:#94a3b8">No stocks qualified in this sector today.</td></tr></tbody>
-      </table>
-    </div>
-
-    <div style="background:#1e293b;margin-top:20px;border-radius:8px;overflow:hidden;
-                border:1px solid #334155">
-      <div style="padding:16px 20px;border-bottom:1px solid #334155">
-        <h2 style="margin:0;font-size:18px;color:#38bdf8">Pharma</h2>
-        <p style="margin:6px 0 0;font-size:12px;color:#94a3b8">
-          Fundamental confirmation: <strong style="color:#e2e8f0">25/38 stocks grew profit YoY</strong>
-        </p>
-        <p style="margin:6px 0 0;font-size:11px;color:#94a3b8"><span style="margin-right:10px">DIVISLAB: +66% YoY</span><span style="margin-right:10px">LAURUSLABS: +123% YoY</span><span style="margin-right:10px">WOCKPHARMA: -199% YoY</span><span style="margin-right:10px">SUNPHARMA: +27% YoY</span><span style="margin-right:10px">DRREDDY: -69% YoY</span><span style="margin-right:10px">GLAND: +47% YoY</span><span style="margin-right:10px">ZYDUSLIFE: -35% YoY</span><span style="margin-right:10px">TORNTPHARM: +3% YoY</span><span style="margin-right:10px">LUPIN: +16% YoY</span><span style="margin-right:10px">CIPLA: -39% YoY</span><span style="margin-right:10px">MANKIND: +29% YoY</span><span style="margin-right:10px">GLENMARK: +928% YoY</span><span style="margin-right:10px">AUROPHARMA: +25% YoY</span><span style="margin-right:10px">BIOCON: +54% YoY</span><span style="margin-right:10px">GRANULES: +59% YoY</span><span style="margin-right:10px">ACUTAAS: +70% YoY</span><span style="margin-right:10px">NEULANDLAB: +957% YoY</span><span style="margin-right:10px">SAILIFE: +22% YoY</span><span style="margin-right:10px">PPLPHARMA: -16% YoY</span><span style="margin-right:10px">ASTERDM: -69% YoY</span><span style="margin-right:10px">ALKEM: -22% YoY</span><span style="margin-right:10px">ANTHEM: -12% YoY</span><span style="margin-right:10px">LALPATHLAB: +27% YoY</span><span style="margin-right:10px">ONESOURCE: n/a</span><span style="margin-right:10px">COHANCE: -198% YoY</span><span style="margin-right:10px">CAPLIPOINT: +19% YoY</span><span style="margin-right:10px">RUBICON: +98% YoY</span><span style="margin-right:10px">IPCALAB: +82% YoY</span><span style="margin-right:10px">EMCURE: +36% YoY</span><span style="margin-right:10px">NH: +5% YoY</span><span style="margin-right:10px">KIMS: -56% YoY</span><span style="margin-right:10px">MEDANTA: -1% YoY</span><span style="margin-right:10px">NATCOPHARM: -57% YoY</span><span style="margin-right:10px">AJANTPHARM: +31% YoY</span><span style="margin-right:10px">CONCORDBIO: +32% YoY</span><span style="margin-right:10px">ABBOTINDIA: n/a</span><span style="margin-right:10px">SYNGENE: -110% YoY</span><span style="margin-right:10px">GLAXO: +16% YoY</span><span style="margin-right:10px">VIJAYA: +36% YoY</span><span style="margin-right:10px">RAINBOW: +17% YoY</span></p>
-        <p style="margin:6px 0 0;font-size:12px;color:#94a3b8">
-          Governance check: <strong style="color:#e2e8f0">0/2 flagged for promoter pledge</strong>
-        </p>
-        <p style="margin:6px 0 0;font-size:11px;color:#94a3b8"><span style="margin-right:10px">LALPATHLAB: promoter 53.2%</span><span style="margin-right:10px">MANKIND: promoter 72.6%</span></p>
-      </div>
-      <table style="width:100%;border-collapse:collapse;font-size:13px">
-        <thead>
-          <tr style="background:#0f172a;text-transform:uppercase;font-size:10px;
-                     letter-spacing:0.6px;color:#94a3b8">
-            <th style="padding:8px 14px;text-align:left">Ticker</th>
-            <th style="padding:8px 14px;text-align:right">Entry</th>
-            <th style="padding:8px 14px;text-align:right">RSI</th>
-            <th style="padding:8px 14px;text-align:left">Signals</th>
-            <th style="padding:8px 14px;text-align:right">Stop</th>
-            <th style="padding:8px 14px;text-align:right">Qty</th>
-            <th style="padding:8px 14px;text-align:right">₹ Alloc</th>
-            <th style="padding:8px 14px;text-align:right">% Capital</th>
-            <th style="padding:8px 14px;text-align:left">Sizing formula</th>
-          </tr>
-        </thead>
-        <tbody>
-        <tr style="border-bottom:1px solid #334155">
-          <td style="padding:10px 14px;font-weight:600;color:#38bdf8">LALPATHLAB<br>
-              <span style="font-weight:400;font-size:10px;color:#f87171">Small Cap</span></td>
-          <td style="padding:10px 14px;text-align:right">₹1,981.80</td>
-          <td style="padding:10px 14px;text-align:right">63.5</td>
-          <td style="padding:10px 14px"><span style="background:#334155;border-radius:4px;padding:2px 6px;font-size:10px;margin-right:4px">Near 52w High</span> <span style="background:#334155;border-radius:4px;padding:2px 6px;font-size:10px;margin-right:4px">RS > Sector</span> <span style="background:#334155;border-radius:4px;padding:2px 6px;font-size:10px;margin-right:4px">Delivery 56%</span></td>
-          <td style="padding:10px 14px;text-align:right">₹nan</td>
-          <td style="padding:10px 14px;text-align:right">0</td>
-          <td style="padding:10px 14px;text-align:right">₹0</td>
-          <td style="padding:10px 14px;text-align:right;font-weight:700">0.0%</td>
-          <td style="padding:10px 14px;font-size:10px;color:#94a3b8;max-width:260px">n/a</td>
-        </tr>
-
-        <tr style="border-bottom:1px solid #334155">
-          <td style="padding:10px 14px;font-weight:600;color:#38bdf8">MANKIND<br>
-              <span style="font-weight:400;font-size:10px;color:#fbbf24">Mid Cap</span></td>
-          <td style="padding:10px 14px;text-align:right">₹2,511.40</td>
-          <td style="padding:10px 14px;text-align:right">60.5</td>
-          <td style="padding:10px 14px"><span style="background:#334155;border-radius:4px;padding:2px 6px;font-size:10px;margin-right:4px">Near 52w High</span> <span style="background:#334155;border-radius:4px;padding:2px 6px;font-size:10px;margin-right:4px">RS > Sector</span> <span style="background:#334155;border-radius:4px;padding:2px 6px;font-size:10px;margin-right:4px">Delivery 59%</span></td>
-          <td style="padding:10px 14px;text-align:right">₹nan</td>
-          <td style="padding:10px 14px;text-align:right">0</td>
-          <td style="padding:10px 14px;text-align:right">₹0</td>
-          <td style="padding:10px 14px;text-align:right;font-weight:700">0.0%</td>
-          <td style="padding:10px 14px;font-size:10px;color:#94a3b8;max-width:260px">n/a</td>
-        </tr></tbody>
-      </table>
-    </div>
-
-  
-        <div style="margin-top:24px;padding:16px;background:#7f1d1d;border-radius:8px;
-                    border-left:4px solid #f87171">
-          <p style="margin:0 0 8px;font-weight:700;color:#f87171">⚠ Errors / Warnings</p>
-          <ul style="margin:0;padding-left:18px;color:#fca5a5;font-size:13px"><li>Market regime filter: price <= 200d SMA (21789.2 vs 22957.4); SMA 21d RoC -0.49% (below 1.0% threshold); breadth 15% of universe above own 50d SMA (informational only) — not in a clean uptrend, new entries paused — no new entries today.</li></ul>
-        </div>
-
-  <div style="margin-top:24px;padding:16px 20px;background:#1e293b;border-radius:8px;
-              border-left:4px solid #334155">
-    <p style="margin:0;font-size:11px;color:#94a3b8;line-height:1.6">
-      <strong>Disclaimer:</strong> This report is generated automatically for informational
-      purposes only and does not constitute financial advice. Position sizing formulas are
-      shown so you can verify the math yourself. Always perform your own due diligence
-      before making any investment decisions. Past technical/fundamental signals do not
-      guarantee future performance.
-    </p>
-  </div>
-
-  <p style="text-align:center;font-size:11px;color:#94a3b8;margin:20px 0 32px">
-    Generated by Sector Screener Bot · Runs weekdays at 08:00 IST via GitHub Actions
-  </p>
-
+<div class="card hero">
+  <div><div class="tile-label">Paper portfolio equity</div><div class="hero-value">₹5,00,000</div><div class="muted">started at ₹5,00,000</div></div>
+  <div class="context-wrap"><ul class="context"><li><strong>Broad market:</strong> price &lt;= 200d SMA (21857.8 vs 22957.7); SMA 21d RoC -0.49% (below 1.0% threshold); breadth 17% of universe above own 50d SMA (informational only) — broad market not in a clean uptrend. <span class="muted">Shown for context only — it no longer blocks trades.</span></li><li><strong>FII/DII net flow (30-Sep-2026):</strong> FII <span class="down">▼ −₹10,148</span> cr, DII <span class="up">▲ ₹11,272</span> cr <span class="muted">(informational, not backtested)</span></li></ul></div>
 </div>
+
+<div class="tiles"><div class="tile"><div class="tile-label">Total return</div><div class="tile-value"><span class="flat">0.00%</span></div><div class="tile-sub">since 2026-10-01</div></div><div class="tile"><div class="tile-label">Nifty500, same period</div><div class="tile-value"><span class="flat">0.00%</span></div><div class="tile-sub">difference <span class="flat">0.00 pp</span></div></div><div class="tile"><div class="tile-label">Realized P&amp;L</div><div class="tile-value"><span class="flat">₹0</span></div><div class="tile-sub">0 closed trades</div></div><div class="tile"><div class="tile-label">Unrealized P&amp;L</div><div class="tile-value"><span class="flat">₹0</span></div><div class="tile-sub">0 open positions</div></div><div class="tile"><div class="tile-label">Cash</div><div class="tile-value">₹5,00,000</div><div class="tile-sub">100% of equity · 6 orders for next open</div></div><div class="tile"><div class="tile-label">Win rate</div><div class="tile-value">—</div><div class="tile-sub">no closed trades yet</div></div><div class="tile"><div class="tile-label">Max drawdown</div><div class="tile-value">0.0%</div><div class="tile-sub">1 session tracked</div></div></div>
+
+<div class="card">
+  <h2>Equity vs Nifty500</h2>
+  <p class="card-desc">The paper portfolio's value each session, against what the same starting capital would be worth in the Nifty500.</p>
+  <div class="legend"><span><span class="key" style="background:var(--series-1)"></span>Paper portfolio</span><span><span class="key" style="background:var(--context)"></span>Nifty500 (same start)</span></div>
+  <div class="chart-box"><canvas id="equityChart" aria-label="Equity versus Nifty500 line chart" role="img"></canvas><p class="empty" id="equityEmpty" hidden>The curve appears after the second daily run.</p></div>
+  <details><summary>Show data table</summary><div class="table-wrap"><table><thead><tr><th class="">Date</th><th class="num">Equity</th><th class="num">Cash</th><th class="num">Invested</th><th class="num">Realized</th><th class="num">Unrealized</th><th class="num">Open</th><th class="num">Nifty500</th></tr></thead><tbody><tr><td class="">2026-10-01</td><td class="num">₹5,00,000</td><td class="num">₹5,00,000</td><td class="num">₹0</td><td class="num"><span class="flat">₹0</span></td><td class="num"><span class="flat">₹0</span></td><td class="num">0</td><td class="num">21,857.75</td></tr></tbody></table></div></details>
+</div>
+
+<div class="grid-2">
+  <div class="card">
+    <h2>Drawdown</h2>
+    <p class="card-desc">How far each line is below its own previous high.</p>
+    <div class="legend"><span><span class="key" style="background:var(--series-1)"></span>Paper portfolio</span><span><span class="key" style="background:var(--context)"></span>Nifty500</span></div>
+    <div class="chart-box"><canvas id="drawdownChart" aria-label="Drawdown line chart" role="img"></canvas><p class="empty" id="drawdownEmpty" hidden>Needs at least two sessions.</p></div>
+  </div>
+  <div class="card">
+    <h2>P&amp;L per closed trade</h2>
+    <p class="card-desc">Each bar is one finished trade, after costs (0.15% per side).</p>
+    <div class="legend"><span><span class="swatch" style="background:var(--gain)"></span>Gain</span><span><span class="swatch" style="background:var(--loss)"></span>Loss</span></div>
+    <div class="chart-box"><canvas id="tradesChart" aria-label="Profit and loss per closed trade bar chart" role="img"></canvas><p class="empty" id="tradesEmpty" hidden>No closed trades yet.</p></div>
+  </div>
+</div>
+<div style="height:16px"></div>
+
+<div class="card">
+  <h2>Today's activity</h2>
+  <p class="card-desc">Orders are placed after the close and fill at the next session's open.</p>
+  <div class="table-wrap"><table><thead><tr><th class="">Action</th><th class="">Ticker</th><th class="">Sector</th><th class="">Quantity</th><th class="txt">Detail</th></tr></thead><tbody><tr><td class="">Order placed</td><td class="">STLTECH</td><td class="">Telecom</td><td class="">32 shares (~₹30,571)</td><td class="txt">buys at next session's open</td></tr><tr><td class="">Order placed</td><td class="">TDPOWERSYS</td><td class="">Capital Goods</td><td class="">39 shares (~₹30,894)</td><td class="txt">buys at next session's open</td></tr><tr><td class="">Order placed</td><td class="">LALPATHLAB</td><td class="">Pharma</td><td class="">20 shares (~₹40,102)</td><td class="txt">buys at next session's open</td></tr><tr><td class="">Order placed</td><td class="">HFCL</td><td class="">Telecom</td><td class="">131 shares (~₹31,225)</td><td class="txt">buys at next session's open</td></tr><tr><td class="">Order placed</td><td class="">AZAD</td><td class="">Capital Goods</td><td class="">10 shares (~₹28,609)</td><td class="txt">buys at next session's open</td></tr><tr><td class="">Order placed</td><td class="">MANKIND</td><td class="">Pharma</td><td class="">30 shares (~₹76,050)</td><td class="txt">buys at next session's open</td></tr></tbody></table></div>
+</div>
+
+<div class="card">
+  <h2>Open positions</h2>
+  <p class="card-desc">Stops trail at 2.5×ATR below the highest close. "Room to stop" is how far price can fall before the position is sold.</p>
+  <p class="empty">No open positions.</p>
+</div>
+
+<div class="grid-2">
+  <div class="card">
+    <h2>Exposure by sector</h2>
+    <p class="card-desc">Market value of open positions.</p>
+    <div class="chart-box"><canvas id="exposureChart" aria-label="Exposure by sector bar chart" role="img"></canvas><p class="empty" id="exposureEmpty" hidden>No open positions.</p></div>
+  </div>
+  <div class="card">
+    <h2>Orders for the next open</h2>
+    <p class="card-desc">Placed today; cancelled automatically if the stock opens below its stop.</p>
+    <div class="table-wrap"><table><thead><tr><th class="">Ticker</th><th class="">Sector</th><th class="">Signal date</th><th class="num">Signal close</th><th class="num">Qty</th><th class="num">Est. stop</th><th class="num">Risk</th><th class="num">Est. cost</th></tr></thead><tbody><tr><td class=""><strong>STLTECH</strong></td><td class="">Telecom</td><td class="">2026-10-01</td><td class="num">₹955.35</td><td class="num">32</td><td class="num">₹878.92</td><td class="num">₹2,500</td><td class="num">₹30,571</td></tr><tr><td class=""><strong>TDPOWERSYS</strong></td><td class="">Capital Goods</td><td class="">2026-10-01</td><td class="num">₹792.15</td><td class="num">39</td><td class="num">₹728.78</td><td class="num">₹2,500</td><td class="num">₹30,894</td></tr><tr><td class=""><strong>LALPATHLAB</strong></td><td class="">Pharma</td><td class="">2026-10-01</td><td class="num">₹2,005.10</td><td class="num">20</td><td class="num">₹1,881.50</td><td class="num">₹2,500</td><td class="num">₹40,102</td></tr><tr><td class=""><strong>HFCL</strong></td><td class="">Telecom</td><td class="">2026-10-01</td><td class="num">₹238.36</td><td class="num">131</td><td class="num">₹219.29</td><td class="num">₹2,500</td><td class="num">₹31,225</td></tr><tr><td class=""><strong>AZAD</strong></td><td class="">Capital Goods</td><td class="">2026-10-01</td><td class="num">₹2,860.90</td><td class="num">10</td><td class="num">₹2,632.03</td><td class="num">₹2,500</td><td class="num">₹28,609</td></tr><tr><td class=""><strong>MANKIND</strong></td><td class="">Pharma</td><td class="">2026-10-01</td><td class="num">₹2,535.00</td><td class="num">30</td><td class="num">₹2,410.69</td><td class="num">₹3,750</td><td class="num">₹76,050</td></tr></tbody></table></div>
+  </div>
+</div>
+<div style="height:16px"></div>
+
+<div class="card">
+  <h2>Today's screening candidates</h2>
+  <p class="card-desc">Every stock that passed RSI/MACD, the Trend Template and the governance check in the leading sectors, and what the portfolio rules decided.</p>
+  <div class="table-wrap"><table><thead><tr><th class="">Ticker</th><th class="">Sector</th><th class="">Cap</th><th class="num">Close</th><th class="num">RSI</th><th class="num">Strength</th><th class="txt">Decision</th></tr></thead><tbody><tr><td class=""><strong>STLTECH</strong></td><td class="">Telecom</td><td class="">Small</td><td class="num">₹955.35</td><td class="num">71.8</td><td class="num">3.72</td><td class="txt">Order placed: 32 shares for next open</td></tr><tr><td class=""><strong>HFCL</strong></td><td class="">Telecom</td><td class="">Small</td><td class="num">₹238.36</td><td class="num">59.0</td><td class="num">1.59</td><td class="txt">Order placed: 131 shares for next open</td></tr><tr><td class=""><strong>TDPOWERSYS</strong></td><td class="">Capital Goods</td><td class="">Small</td><td class="num">₹792.15</td><td class="num">58.1</td><td class="num">3.58</td><td class="txt">Order placed: 39 shares for next open</td></tr><tr><td class=""><strong>AZAD</strong></td><td class="">Capital Goods</td><td class="">Small</td><td class="num">₹2,860.90</td><td class="num">56.1</td><td class="num">2.56</td><td class="txt">Order placed: 10 shares for next open</td></tr><tr><td class=""><strong>CPPLUS</strong></td><td class="">Capital Goods</td><td class="">Small</td><td class="num">₹3,799.60</td><td class="num">55.8</td><td class="num">2.56</td><td class="txt">Sector already has 2 positions</td></tr><tr><td class=""><strong>CARBORUNIV</strong></td><td class="">Capital Goods</td><td class="">Small</td><td class="num">₹1,239.70</td><td class="num">59.9</td><td class="num">1.60</td><td class="txt">Sector already has 2 positions</td></tr><tr><td class=""><strong>SYRMA</strong></td><td class="">Capital Goods</td><td class="">Small</td><td class="num">₹1,717.90</td><td class="num">59.0</td><td class="num">1.59</td><td class="txt">Sector already has 2 positions</td></tr><tr><td class=""><strong>LALPATHLAB</strong></td><td class="">Pharma</td><td class="">Small</td><td class="num">₹2,005.10</td><td class="num">67.6</td><td class="num">4.68</td><td class="txt">Order placed: 20 shares for next open</td></tr><tr><td class=""><strong>MANKIND</strong></td><td class="">Pharma</td><td class="">Mid</td><td class="num">₹2,535.00</td><td class="num">62.2</td><td class="num">3.62</td><td class="txt">Order placed: 30 shares for next open</td></tr></tbody></table></div>
+</div>
+
+<div class="grid-2">
+  <div class="card">
+    <h2>Sector ranking today</h2>
+    <p class="card-desc">Relative strength vs Nifty500 (weighted 1M/3M/6M). ★ = the 4 leading sectors screened today.</p>
+    <div class="legend"><span><span class="swatch" style="background:var(--gain)"></span>Beating Nifty500</span><span><span class="swatch" style="background:var(--loss)"></span>Lagging</span></div>
+    <div class="chart-box tall"><canvas id="sectorChart" aria-label="Sector relative strength bar chart" role="img"></canvas></div>
+  </div>
+  <div class="card">
+    <h2>Sector ranking table</h2>
+    <p class="card-desc">&nbsp;</p>
+    <div class="table-wrap"><table><thead><tr><th class="">Rank</th><th class="">Sector</th><th class="num">Stocks</th><th class="num">Score</th><th class="num">1M RS</th><th class="num">3M RS</th><th class="num">6M RS</th></tr></thead><tbody><tr><td class="">1 ★</td><td class="">Telecom</td><td class="num">8</td><td class="num"><span class="up">▲ +37.8</span></td><td class="num">+16.4%</td><td class="num">+22.9%</td><td class="num">+113.5%</td></tr><tr><td class="">2 ★</td><td class="">Capital Goods</td><td class="num">40</td><td class="num"><span class="up">▲ +12.8</span></td><td class="num">+5.9%</td><td class="num">+12.8%</td><td class="num">+29.9%</td></tr><tr><td class="">3 ★</td><td class="">Media Entertainment &amp; Publication</td><td class="num">4</td><td class="num"><span class="up">▲ +10.0</span></td><td class="num">+11.4%</td><td class="num">+18.1%</td><td class="num">-5.4%</td></tr><tr><td class="">4 ★</td><td class="">Pharma</td><td class="num">40</td><td class="num"><span class="up">▲ +9.5</span></td><td class="num">+4.1%</td><td class="num">+9.2%</td><td class="num">+23.4%</td></tr><tr><td class="">5</td><td class="">Textiles</td><td class="num">5</td><td class="num"><span class="up">▲ +8.6</span></td><td class="num">+7.1%</td><td class="num">+4.6%</td><td class="num">+18.5%</td></tr><tr><td class="">6</td><td class="">FMCG</td><td class="num">28</td><td class="num"><span class="up">▲ +6.0</span></td><td class="num">+4.2%</td><td class="num">+4.8%</td><td class="num">+12.0%</td></tr><tr><td class="">7</td><td class="">Services</td><td class="num">11</td><td class="num"><span class="up">▲ +5.5</span></td><td class="num">+4.7%</td><td class="num">+2.6%</td><td class="num">+12.0%</td></tr><tr><td class="">8</td><td class="">Defense</td><td class="num">12</td><td class="num"><span class="up">▲ +5.4</span></td><td class="num">+2.6%</td><td class="num">+1.0%</td><td class="num">+18.8%</td></tr><tr><td class="">9</td><td class="">Consumer Services</td><td class="num">21</td><td class="num"><span class="up">▲ +5.0</span></td><td class="num">+3.1%</td><td class="num">+6.6%</td><td class="num">+7.5%</td></tr><tr><td class="">10</td><td class="">Auto</td><td class="num">38</td><td class="num"><span class="up">▲ +4.4</span></td><td class="num">+0.6%</td><td class="num">+5.7%</td><td class="num">+11.9%</td></tr><tr><td class="">11</td><td class="">Energy</td><td class="num">24</td><td class="num"><span class="up">▲ +3.5</span></td><td class="num">+3.8%</td><td class="num">+0.4%</td><td class="num">+7.6%</td></tr><tr><td class="">12</td><td class="">Construction</td><td class="num">9</td><td class="num"><span class="up">▲ +1.9</span></td><td class="num">+3.1%</td><td class="num">-3.9%</td><td class="num">+7.6%</td></tr><tr><td class="">13</td><td class="">Chemicals</td><td class="num">25</td><td class="num"><span class="up">▲ +1.9</span></td><td class="num">+1.3%</td><td class="num">+1.1%</td><td class="num">+4.8%</td></tr><tr><td class="">14</td><td class="">Infrastructure</td><td class="num">22</td><td class="num"><span class="up">▲ +0.6</span></td><td class="num">+1.5%</td><td class="num">-2.6%</td><td class="num">+3.3%</td></tr><tr><td class="">15</td><td class="">IT</td><td class="num">25</td><td class="num"><span class="up">▲ +0.4</span></td><td class="num">-1.3%</td><td class="num">+4.9%</td><td class="num">-2.2%</td></tr><tr><td class="">16</td><td class="">Banking</td><td class="num">40</td><td class="num"><span class="down">▼ -0.6</span></td><td class="num">-1.4%</td><td class="num">-0.9%</td><td class="num">+2.0%</td></tr><tr><td class="">17</td><td class="">Consumer Durables</td><td class="num">16</td><td class="num"><span class="down">▼ -0.7</span></td><td class="num">-1.0%</td><td class="num">-2.2%</td><td class="num">+2.3%</td></tr><tr><td class="">18</td><td class="">PSU</td><td class="num">17</td><td class="num"><span class="down">▼ -1.7</span></td><td class="num">-0.1%</td><td class="num">+0.5%</td><td class="num">-9.0%</td></tr><tr><td class="">19</td><td class="">Diversified</td><td class="num">1</td><td class="num"><span class="down">▼ -2.2</span></td><td class="num">-4.1%</td><td class="num">-9.5%</td><td class="num">+13.3%</td></tr><tr><td class="">20</td><td class="">Real Estate</td><td class="num">12</td><td class="num"><span class="down">▼ -2.2</span></td><td class="num">-2.6%</td><td class="num">-4.1%</td><td class="num">+1.4%</td></tr><tr><td class="">21</td><td class="">Railways</td><td class="num">7</td><td class="num"><span class="down">▼ -2.8</span></td><td class="num">+2.5%</td><td class="num">-5.3%</td><td class="num">-12.2%</td></tr><tr><td class="">22</td><td class="">Metals</td><td class="num">17</td><td class="num"><span class="down">▼ -3.3</span></td><td class="num">-0.7%</td><td class="num">-1.4%</td><td class="num">-12.4%</td></tr><tr><td class="">23</td><td class="">Construction Materials</td><td class="num">9</td><td class="num"><span class="down">▼ -5.5</span></td><td class="num">-0.8%</td><td class="num">-7.0%</td><td class="num">-14.9%</td></tr></tbody></table></div>
+  </div>
+</div>
+<div style="height:16px"></div>
+
+<div class="card">
+  <h2>Closed trades</h2>
+  <p class="empty">No closed trades yet.</p>
+</div>
+
+<div class="card note">
+  <h2>How this paper account works</h2>
+  <ul>
+    <li>Starts with ₹5,00,000. Each weekday evening the screener ranks sectors, screens the 4 leaders, and places orders for qualifying stocks. Orders fill at the next session's opening price.</li>
+    <li>Sizing: risk 1.0% / 0.75% / 0.5% of capital per trade for large / mid / small caps, at most 2 positions per sector, at most 85% of capital invested and 8% total risk.</li>
+    <li>Exits: initial stop at min(2×ATR, 8%) below entry, trailing at 2.5×ATR below the highest close; sell at the next open if RSI closes below 45 or after 26 sessions.</li>
+    <li>Costs of 0.15% on every buy and sell (STT, stamp duty, exchange and DP charges).</li>
+    <li>The broad-market (200-day) filter was turned off on 1 Oct 2026; it is still shown above for context.</li>
+    <li>What to expect, from the 8.8-year backtest of this exact setup: about 13.9% a year with drawdowns up to -49% and a win rate near 36%, against 11.3% a year and -38% for simply holding the Nifty500. Most trades lose a little; a few large winners carry the result. Three months is a short sample — judge it against the index, not in isolation.</li>
+  </ul>
+</div>
+
+<footer>Paper trading only — not financial advice. Data: Yahoo Finance end-of-day prices, NSE, Screener.in.</footer>
+</div>
+
+<script type="application/json" id="chartData">{"dates": ["2026-10-01"], "equity": [500000.0], "benchmark": [500000.0], "trades": [], "exposure": [], "sectors": [{"sector": "Telecom \u2605", "score": 37.79}, {"sector": "Capital Goods \u2605", "score": 12.77}, {"sector": "Media Entertainment & Publication \u2605", "score": 10.02}, {"sector": "Pharma \u2605", "score": 9.5}, {"sector": "Textiles", "score": 8.6}, {"sector": "FMCG", "score": 5.98}, {"sector": "Services", "score": 5.53}, {"sector": "Defense", "score": 5.37}, {"sector": "Consumer Services", "score": 5.03}, {"sector": "Auto", "score": 4.38}, {"sector": "Energy", "score": 3.52}, {"sector": "Construction", "score": 1.93}, {"sector": "Chemicals", "score": 1.92}, {"sector": "Infrastructure", "score": 0.63}, {"sector": "IT", "score": 0.4}, {"sector": "Banking", "score": -0.57}, {"sector": "Consumer Durables", "score": -0.66}, {"sector": "PSU", "score": -1.69}, {"sector": "Diversified", "score": -2.24}, {"sector": "Real Estate", "score": -2.25}, {"sector": "Railways", "score": -2.78}, {"sector": "Metals", "score": -3.26}, {"sector": "Construction Materials", "score": -5.49}]}</script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script>
+(function () {
+  const data = JSON.parse(document.getElementById('chartData').textContent);
+  if (typeof Chart === 'undefined') return;
+  const css = getComputedStyle(document.documentElement);
+  const v = n => css.getPropertyValue(n).trim();
+  const C = { ink: v('--ink'), ink2: v('--ink-2'), muted: v('--muted'), grid: v('--grid'), base: v('--baseline'),
+               s1: v('--series-1'), ctx: v('--context'), gain: v('--gain'), loss: v('--loss'), surface: v('--surface') };
+  Chart.defaults.color = C.muted;
+  Chart.defaults.font.family = 'system-ui, -apple-system, "Segoe UI", sans-serif';
+  Chart.defaults.font.size = 12;
+  const inr = x => (x < 0 ? '−₹' : '₹') + Math.abs(Math.round(x)).toLocaleString('en-IN');
+  const tooltip = { backgroundColor: C.surface, borderColor: C.base, borderWidth: 1, titleColor: C.ink2,
+                     bodyColor: C.ink, padding: 10, boxPadding: 4, usePointStyle: true };
+  const axis = { grid: { color: C.grid }, border: { color: C.base }, ticks: { color: C.muted } };
+  const show = (id, ok) => { if (!ok) document.getElementById(id).hidden = false; return ok; };
+
+  const crosshair = { id: 'crosshair', afterDatasetsDraw(chart) {
+    const a = chart.tooltip && chart.tooltip.getActiveElements();
+    if (!a || !a.length) return;
+    const x = a[0].element.x, { top, bottom } = chart.chartArea, ctx = chart.ctx;
+    ctx.save(); ctx.strokeStyle = C.base; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(x, top); ctx.lineTo(x, bottom); ctx.stroke(); ctx.restore();
+  } };
+  const endLabels = fmt => ({ id: 'endLabels', afterDatasetsDraw(chart) {
+    const ctx = chart.ctx; ctx.save(); ctx.font = '12px system-ui, sans-serif'; ctx.fillStyle = C.ink2; ctx.textAlign = 'left';
+    chart.data.datasets.forEach((ds, i) => {
+      const pts = chart.getDatasetMeta(i).data; const last = pts[pts.length - 1];
+      const val = ds.data[ds.data.length - 1]; if (!last || val == null) return;
+      ctx.fillText(ds.label + ' ' + fmt(val), last.x + 8, last.y + 4);
+    }); ctx.restore();
+  } });
+  const lineDs = (label, values, color, fill) => ({ label, data: values, borderColor: color, backgroundColor: color + '1a',
+    borderWidth: 2, pointRadius: 0, pointHoverRadius: 4, pointHoverBorderWidth: 2, pointHoverBorderColor: C.surface,
+    pointHoverBackgroundColor: color, tension: 0, fill: fill ? 'origin' : false, borderJoinStyle: 'round', borderCapStyle: 'round' });
+  const lineOpts = (fmt, rightPad) => ({ responsive: true, maintainAspectRatio: false, animation: false,
+    interaction: { mode: 'index', intersect: false }, layout: { padding: { right: rightPad } },
+    plugins: { legend: { display: false }, tooltip: { ...tooltip, callbacks: { label: c => ' ' + c.dataset.label + ': ' + fmt(c.parsed.y) } } },
+    scales: { x: { ...axis, grid: { display: false }, ticks: { color: C.muted, maxTicksLimit: 6, maxRotation: 0,
+               callback(v) { const d = new Date(this.getLabelForValue(v)); return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }); } } },
+               y: { ...axis, ticks: { color: C.muted, callback: fmt } } } });
+
+  if (show('equityEmpty', data.dates.length >= 2)) {
+    new Chart(document.getElementById('equityChart'), { type: 'line',
+      data: { labels: data.dates, datasets: [lineDs('Paper', data.equity, C.s1, false), lineDs('Nifty500', data.benchmark, C.ctx, false)] },
+      options: lineOpts(inr, 120), plugins: [crosshair, endLabels(inr)] });
+  }
+
+  const dd = arr => { let peak = -Infinity; return arr.map(x => { if (x == null) return null; peak = Math.max(peak, x); return +((x / peak - 1) * 100).toFixed(2); }); };
+  const pct = x => x.toFixed(1) + '%';
+  if (show('drawdownEmpty', data.dates.length >= 2)) {
+    new Chart(document.getElementById('drawdownChart'), { type: 'line',
+      data: { labels: data.dates, datasets: [lineDs('Paper', dd(data.equity), C.s1, true), lineDs('Nifty500', dd(data.benchmark), C.ctx, false)] },
+      options: lineOpts(pct, 10), plugins: [crosshair] });
+  }
+
+  const barOpts = (horizontal, fmt) => ({ responsive: true, maintainAspectRatio: false, animation: false,
+    indexAxis: horizontal ? 'y' : 'x',
+    plugins: { legend: { display: false }, tooltip: { ...tooltip, callbacks: { label: c => ' ' + fmt(horizontal ? c.parsed.x : c.parsed.y) } } },
+    scales: { x: { ...axis, grid: { display: horizontal, color: C.grid }, ticks: { color: C.muted, maxRotation: 0, ...(horizontal ? { callback: fmt } : {}) } },
+               y: { ...axis, grid: { display: !horizontal, color: C.grid }, ticks: { color: C.muted, autoSkip: false, ...(horizontal ? {} : { callback: fmt }) } } } });
+  const barDs = (values, colors) => ({ data: values, backgroundColor: colors, maxBarThickness: 24,
+    borderRadius: { topLeft: 4, topRight: 4, bottomLeft: 4, bottomRight: 4 }, borderSkipped: 'start', borderWidth: 0,
+    hoverBackgroundColor: colors });
+
+  if (show('tradesEmpty', data.trades.length > 0)) {
+    const vals = data.trades.map(t => t.pnl);
+    const opts = barOpts(false, inr); opts.scales.x.ticks.display = data.trades.length <= 20;
+    new Chart(document.getElementById('tradesChart'), { type: 'bar',
+      data: { labels: data.trades.map(t => t.label), datasets: [barDs(vals, vals.map(x => x >= 0 ? C.gain : C.loss))] },
+      options: opts });
+  }
+
+  if (show('exposureEmpty', data.exposure.length > 0)) {
+    new Chart(document.getElementById('exposureChart'), { type: 'bar',
+      data: { labels: data.exposure.map(e => e.sector), datasets: [barDs(data.exposure.map(e => e.value), C.s1)] },
+      options: barOpts(true, inr) });
+  }
+
+  const sv = data.sectors.map(s => s.score);
+  new Chart(document.getElementById('sectorChart'), { type: 'bar',
+    data: { labels: data.sectors.map(s => s.sector), datasets: [barDs(sv, sv.map(x => x >= 0 ? C.gain : C.loss))] },
+    options: barOpts(true, x => (x > 0 ? '+' : '') + Number(x).toFixed(1)) });
+})();
+</script>
 </body>
 </html>
