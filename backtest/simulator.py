@@ -77,7 +77,7 @@ class BacktestConfig:
     entry_paradigm: EntryParadigm = "trend_template"
     exit_paradigm: ExitParadigm = "trailing"
     account_size: float = 500_000.0
-    apply_market_regime_filter: bool = True
+    apply_market_regime_filter: bool = False  # off live since 2026-10-01 (STRATEGY.md §16) — kept testable
     apply_liquidity_filter: bool = True
     apply_drawdown_circuit_breaker: bool = False
     drawdown_halt_pct: float = 15.0    # halt NEW entries once strategy equity is this far below its own peak

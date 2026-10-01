@@ -76,6 +76,19 @@ confidence instead of trying to validate our own number. **User picked Path B.**
 | 7.1 | **Restrict Task 5's factor replica to the midcap-only pool, 50 holdings.** Added `FactorConfig.universe_scope="midcap_only"` (filters to `cap_band=="Mid"`, reusing `sector_mapper.build_universe()`'s existing tagging — no new data source) and `MIDCAP_NUM_HOLDINGS=50` (Midcap150 Momentum 50's real constituent count), additive to `backtest/factor_momentum.py`/`run_factor_backtest.py`. Confirmed the midcap filter tagged **exactly 150** tickers (matches NSE's real Midcap150 count precisely) and that the default (`full_nifty500`) CLI path reproduces Task 5's original +34.5%/+35.4% CAGR numbers exactly — a clean regression check. | `backtest/factor_momentum.py`, `backtest/run_factor_backtest.py` | **Done** |
 | 7.2 | **Result, read carefully: >18% CAGR shown (18.3-26.9% across variants), but this is not validation.** Same survivorship-biased universe as Task 5, arguably worse for a midcap-only pool (smaller companies have a higher real-world delisting rate that "today's survivors" silently excludes). **New confirming evidence, not just a repeated caveat**: our backtest's Max DD (-33.0%) is roughly *half* the real index's own live -72.5% — the bias inflates both return AND understates risk, in the same direction, which is exactly what a survivor-only universe would do. The honest deliverable: a strategy whose mechanics now closely mirror a real index with a genuine 20.4%/-72.5% track record — the honest forward expectation is *that index's own number*, not this backtest's higher one. Path A (point-in-time data) remains the only route to a number from our own tooling worth trusting. | — | **Done** — see `STRATEGY.md` §15 |
 
+## Task 8: Market filter off, built-in paper account, dashboard, schedule fix (2026-10-01)
+
+The user asked to remove the 200-day market filter ("some sector always has a trade"),
+to paper trade daily inside the project with a detailed dashboard, and reported that
+no 8 AM email arrived.
+
+| Phase | Description | Key files | Status |
+|---|---|---|---|
+| 8.1 | **Market filter → informational.** Measured first on the 8.8y backtest: Trend Template/trailing CAGR +7.3% → +13.9%, max DD -48.0% → -48.9%, Calmar 0.15 → 0.28 (index 0.29). RSI+MACD-only DD worsens sharply without it (-54.6% → -63.3%), showing the Trend Template is what protects the live config. Backtest default switched to match live. | `main.py`, `modules/market_regime.py`, `backtest/simulator.py` | **Done** — STRATEGY.md §16 |
+| 8.2 | **Paper account.** Next-open fills, bar-by-bar exit replay, cash derived from the ledger, 0.15%/side costs. Verified on cached history (fills at T+1 open; RELIANCE and TCS hand-replayed bar by bar and matched; P&L matched to the rupee) and a 45-session daily replay (no duplicate holdings, ≤2 per sector, cash never negative, accounting reconciles exactly). | `modules/paper_trader.py` (new, replaces `paper_trade_log.py`), `modules/portfolio_allocator.py` | **Done** |
+| 8.3 | **Dashboard** at the site root: KPIs, equity vs Nifty500, drawdown, per-trade P&L, sector exposure and ranking, tables for positions/orders/closed trades/candidates, CSV downloads. Checked in the browser at desktop and phone width; fixed category-axis labels, column alignment and a CSS class clash found there. | `modules/dashboard.py` (new), `modules/report_generator.py` (report → `latest.html`) | **Done** |
+| 8.4 | **Schedule.** GitHub had started the 08:00 IST job 4-6h late every recorded day. Moved to 17:00 IST (after close) + 21:00 IST self-skipping backup; concurrency guard; commit step rebases before pushing. Email now leads with the paper portfolio. | `.github/workflows/schedule.yml`, `modules/email_alerter.py` | **Done** — watch the first evening run |
+
 ## Notes for future sessions
 
 - Each phase should be sanity-checked against a few known historical examples before

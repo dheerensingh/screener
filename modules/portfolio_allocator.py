@@ -25,6 +25,7 @@ identical in both — the same guarantee already applied to the indicator math.
 
 import logging
 from dataclasses import dataclass, field
+from typing import Optional
 
 from .position_sizer import PositionSize, size_position
 from .technical_analyzer import ScreenResult
@@ -59,6 +60,8 @@ def allocate(
     max_positions_per_sector: int = MAX_POSITIONS_PER_SECTOR,
     max_deployed_capital_pct: float = MAX_DEPLOYED_CAPITAL_PCT,
     max_portfolio_heat_pct: float = MAX_PORTFOLIO_HEAT_PCT,
+    held_tickers: frozenset[str] = frozenset(),
+    held_per_sector: Optional[dict[str, int]] = None,
 ) -> AllocationResult:
     """
     sector_qualifiers: sector name -> qualified ScreenResults for that sector
@@ -66,15 +69,25 @@ def allocate(
     existing_heat_pct / existing_deployed_pct: lets a caller with positions
     already open (live day-to-day, or mid-backtest) account for capital/risk
     already committed before this call's candidates are considered.
+    held_tickers / held_per_sector: positions already open or pending — never
+    bought twice, and they use up their sector's slots.
     """
     result = AllocationResult(total_deployed_pct=existing_deployed_pct, total_heat_pct=existing_heat_pct)
+    held_per_sector = held_per_sector or {}
 
     # Interleave sectors (each sector's #1 pick first, then each's #2, ...) rather
     # than exhausting one sector before the next — keeps the per-sector cap doing
     # real diversification work even when the capital/heat budget runs out early.
-    per_sector_capped = {
-        sector: results[:max_positions_per_sector] for sector, results in sector_qualifiers.items()
-    }
+    per_sector_capped = {}
+    for sector, results in sector_qualifiers.items():
+        for r in results:
+            if r.ticker in held_tickers:
+                result.rejected.append((r, "Already held"))
+        fresh = [r for r in results if r.ticker not in held_tickers]
+        slots = max(0, max_positions_per_sector - held_per_sector.get(sector, 0))
+        for r in fresh[slots:]:
+            result.rejected.append((r, f"Sector already has {max_positions_per_sector} positions"))
+        per_sector_capped[sector] = fresh[:slots]
     rounds = max((len(v) for v in per_sector_capped.values()), default=0)
     ordered: list[ScreenResult] = []
     for round_idx in range(rounds):

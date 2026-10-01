@@ -22,8 +22,12 @@ also tested on the same chop window — real signal, but noisier (swung from
 only, not a hard gate, to avoid overfitting a filter to one historical episode
 on a signal that didn't cleanly separate the two windows.
 
-When the market is not in a clean uptrend, new entries pause — existing open
-positions are still managed by their own exit rules regardless.
+**Informational only since 2026-10-01 — no longer gates entries** (STRATEGY.md
+§16). On the 8.8-year backtest, turning the gate off nearly doubled CAGR (+7.3%
+-> +13.9%) for the live Trend Template paradigm while max drawdown barely moved
+(-48.0% -> -48.9%): each stock must already pass its own Trend Template, which
+does the per-stock version of this job. Still evaluated and shown in the report
+as market context.
 """
 
 import logging
@@ -93,7 +97,7 @@ def evaluate(
     )
     if breadth_pct is not None:
         reason += f"; breadth {breadth_pct:.0f}% of universe above own 50d SMA (informational only)"
-    reason += " — " + ("uptrend, new entries allowed" if in_uptrend else "not in a clean uptrend, new entries paused")
+    reason += " — " + ("broad market in an uptrend" if in_uptrend else "broad market not in a clean uptrend")
 
     return MarketRegime(
         in_uptrend=in_uptrend, benchmark_price=price, benchmark_sma=sma,

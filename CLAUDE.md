@@ -66,8 +66,9 @@ it into the full pipeline above, `instruction.md` for how to work on this repo, 
 5. `modules/report_generator.py` (`build_report_html`, `publish_report`) — renders the
    sector-rotation table + per-sector qualifying-stock tables as a styled HTML page
    (dark theme shared with `email_alerter.PALETTE`), writes it to
-   `docs/reports/YYYY-MM-DD.html` (permanent) and `docs/index.html` (latest, for GitHub
-   Pages), and regenerates `docs/reports/index.html` as a dated archive list.
+   `docs/reports/YYYY-MM-DD.html` (permanent) and `docs/latest.html`, and regenerates
+   `docs/reports/index.html` as a dated archive list. **`docs/index.html` is the paper
+   trading dashboard** (`modules/dashboard.py`, Task 8), not the report.
 6. `modules/email_alerter.py` (`build_summary_email`) — short summary (leading
    sector(s), qualifying stocks with quantity/% capital) + a link to the hosted report,
    sent via Gmail SMTP (`send_email`, unchanged).
@@ -76,10 +77,12 @@ it into the full pipeline above, `instruction.md` for how to work on this repo, 
 by both sector rotation and per-stock screening — pulls OHLCV from `yfinance` in chunks
 of 100 tickers, handling its MultiIndex column layout, requiring ≥60 rows of history.
 
-Deployment: `.github/workflows/schedule.yml` runs on cron (08:00 IST weekdays) plus
-manual `workflow_dispatch`, installs `requirements.txt`, runs `python main.py`, then
-commits any changed `docs/**` files back to `main` so GitHub Pages picks up the new
-report (needs `permissions: contents: write`, already set).
+Deployment: `.github/workflows/schedule.yml` runs on weekday evenings after the NSE
+close — 17:00 IST, plus a 21:00 IST backup that skips itself if the report already
+exists (GitHub's scheduler started the old 08:00 run 4-6 hours late every day) — and
+on manual `workflow_dispatch`. It runs `python main.py`, then commits `docs/**`,
+`paper_trades.csv` and `paper_equity.csv` back to `main` even if email failed, so
+GitHub Pages picks up the new report and the paper account persists.
 
 **Retired:** `modules/twitter_extractor.py` (sentiment-based sector detection) and
 `modules/stock_universe.py` (broad-market ~500-ticker fallback) were deleted — the new
@@ -219,10 +222,10 @@ only the architecture/module map for future coding sessions.
   stays available for a future, more rigorous swing-point-based attempt (this
   implementation is a stated simplification: fixed sub-window contractions, not
   genuine peak/trough detection), but nothing live changed.
-- **New market-wide gate:** `modules/market_regime.py` — the Nifty500 benchmark must be
-  above its own 200-day SMA **and** that SMA must itself be rising ≥1.0% over 21 sessions
-  for `main.py` to size any new positions at all that day (existing positions still exit
-  normally). `sector_rotation.rank_sectors()` now returns a `RotationResult` (scores +
+- **Market regime check:** `modules/market_regime.py` — the Nifty500 benchmark above its
+  own 200-day SMA **and** that SMA rising ≥1.0% over 21 sessions. **Informational only
+  since 2026-10-01 (Task 8)** — it used to block all new entries; see STRATEGY.md §16 for
+  why it was turned off. `sector_rotation.rank_sectors()` now returns a `RotationResult` (scores +
   universe-wide RS ratings + the raw benchmark series + `breadth_pct`), not a bare list —
   needed so `main.py` can pass the benchmark/breadth to this check. **v2, 2026-09-28**:
   the RoC condition was added after the original price-vs-SMA-only check missed a real
@@ -259,17 +262,10 @@ only the architecture/module map for future coding sessions.
   indices from all sufficiently-historied members rather than the live pipeline's
   liquidity-capped 40 (a stability simplification; liquidity/cap filtering still gates
   which stocks can become actual positions).
-- **`modules/paper_trade_log.py`** — appends each day's *accepted* (portfolio-allocated)
-  signals to `paper_trades.csv` for the 3-month forward paper-trading test. Wired into
-  `main.py` as Step 3c. **Committed to the repo, not git-ignored** (changed 2026-09-30
-  when the GitHub Actions automation was deployed — see Task 7's follow-up below): this
-  file is this project's *only* persistent position state (`check_exits()` re-derives
-  each open row's stop from its entry date forward every run), and a GitHub Actions run
-  starts from a fresh checkout each time — if this weren't committed back alongside
-  `docs/`, the log would silently reset to empty every single day and the 3-month
-  paper-trading exercise would never actually track anything across days. Not sensitive
-  data (no money, no account info — just tickers/prices/dates), so committing it is a
-  reasonable tradeoff for the automation actually working.
+- **Paper trading** — originally `modules/paper_trade_log.py`; replaced in Task 8 by
+  `modules/paper_trader.py` (see below). `paper_trades.csv` and `paper_equity.csv` are
+  **committed to the repo, not git-ignored**: they are this project's only persistent
+  state, and every GitHub Actions run starts from a fresh checkout.
 
 ## Task 6 (2026-09-28): alpha/beta diagnostic, governance filter, delivery% + FII/DII flow
 
@@ -337,3 +333,32 @@ survivorship-biased universe as Task 5, and the backtest's Max DD (-33%) being
 roughly half the real index's own -72.5% is further evidence of the same bias, not a
 new finding. See STRATEGY.md §15 for the full "don't trust this number, trust the
 real index" framing — don't let a future session read this CAGR at face value.
+
+## Task 8 (2026-10-01): market filter off, built-in paper account, dashboard
+
+**STRATEGY.md §16 is the canonical reference.** Module map only:
+
+- **Market filter off.** `main.py` no longer gates allocation on
+  `market_regime.evaluate()`; it is logged and shown on the dashboard. Measured
+  first: for the Trend Template configuration, CAGR +7.3% → +13.9% with max DD
+  -48.0% → -48.9% over 8.8 years. `BacktestConfig.apply_market_regime_filter`
+  defaults to `False` to keep backtest and live identical.
+- **`modules/paper_trader.py`** (`PaperTrader`) — the paper account. Per run:
+  fill pending orders at the next session's open (cancel if the open is at or
+  below the stop, cut quantity to cash), replay exits bar by bar from entry
+  (initial/trailing stop intraday, gap below stop at the open, RSI<45 and the
+  26-session backstop at the next open), mark to market, book new orders, write a
+  snapshot. State: `paper_trades.csv` (ledger, statuses PENDING/OPEN/CLOSED/
+  CANCELLED) and `paper_equity.csv` (one row per market date). Cash is derived
+  from the ledger, never stored. Costs: 0.15% per side. The market date is the most
+  common last bar across held/screened stocks; each order's `signal_date` is that
+  stock's own last bar, so a fill can never use a price the signal already saw.
+- **`portfolio_allocator.allocate()`** gained `held_tickers` / `held_per_sector`:
+  already-held stocks are skipped and use up their sector's 2 slots. Rejections are
+  recorded with reasons (shown on the dashboard).
+- **`modules/dashboard.py`** — builds `docs/index.html` (Chart.js from jsdelivr,
+  data embedded as JSON, light/dark from the data-viz reference palette, every chart
+  with a table twin) and copies both CSVs to `docs/data/`.
+- **Email** (`email_alerter.build_summary_email`) now takes the `PaperState`:
+  portfolio value and return vs Nifty500, today's buys/sells, orders for the next
+  open, links to the dashboard and report.

@@ -21,6 +21,7 @@ import smtplib
 from datetime import datetime
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from html import escape
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -41,42 +42,88 @@ PALETTE = {
 }
 
 
+def _email_table(headers: list[str], rows: list[list[str]], empty: str) -> str:
+    if not rows:
+        return f'<p style="margin:8px 0 0;color:{PALETTE["muted"]};font-size:13px">{escape(empty)}</p>'
+    head = "".join(
+        f'<th style="padding:6px 10px;text-align:{"left" if i == 0 else "right"}">{escape(h)}</th>'
+        for i, h in enumerate(headers)
+    )
+    body = "".join(
+        f'<tr style="border-bottom:1px solid {PALETTE["border"]}">' + "".join(
+            f'<td style="padding:6px 10px;text-align:{"left" if i == 0 else "right"}">{c}</td>'
+            for i, c in enumerate(row)
+        ) + "</tr>"
+        for row in rows
+    )
+    return (f'<table style="width:100%;border-collapse:collapse;font-size:13px;margin-top:6px">'
+            f'<thead><tr style="color:{PALETTE["muted"]};font-size:11px">{head}</tr></thead><tbody>{body}</tbody></table>')
+
+
+def _section(title: str, content: str) -> str:
+    return (f'<div style="background:{PALETTE["card"]};padding:14px 20px;margin-top:2px">'
+            f'<p style="margin:0;font-size:11px;text-transform:uppercase;letter-spacing:1px;'
+            f'color:{PALETTE["muted"]}">{escape(title)}</p>{content}</div>')
+
+
+def _pnl(value: float) -> str:
+    colour = PALETTE["green"] if value >= 0 else PALETTE["red"]
+    glyph = "▲" if value >= 0 else "▼"
+    return f'<span style="color:{colour}">{glyph} ₹{abs(value):,.0f}</span>'
+
+
 def build_summary_email(
     leading_sectors: list[str],
-    qualified_rows: list[tuple[str, float, int, float]],
+    paper,  # modules.paper_trader.PaperState
+    dashboard_url: Optional[str],
     report_url: Optional[str],
     errors: list[str],
 ) -> str:
     """
-    Short summary email: leading sector(s), qualifying stocks with quantity/%
-    of capital, and a link to the full HTML report (hosted on GitHub Pages) —
-    replaces the old full-HTML-inline email now that reports live on the web.
-
-    qualified_rows: list of (ticker, entry_price, quantity, allocation_pct).
+    Daily email: the paper portfolio's value and return vs Nifty500, what was
+    bought and sold today, and the orders placed for the next open — with links
+    to the dashboard and the full screening report on GitHub Pages.
     """
     today = datetime.now().strftime("%d %b %Y")
     sector_line = " + ".join(leading_sectors) if leading_sectors else "None detected"
 
-    if qualified_rows:
-        row_html = "\n".join(
-            f'<tr style="border-bottom:1px solid {PALETTE["border"]}">'
-            f'<td style="padding:8px 12px;font-weight:600;color:{PALETTE["accent"]}">{ticker}</td>'
-            f'<td style="padding:8px 12px;text-align:right">₹{price:,.2f}</td>'
-            f'<td style="padding:8px 12px;text-align:right">{qty}</td>'
-            f'<td style="padding:8px 12px;text-align:right">{pct:.1f}%</td></tr>'
-            for ticker, price, qty, pct in qualified_rows
-        )
-    else:
-        row_html = (
-            f'<tr><td colspan="4" style="text-align:center;padding:20px;'
-            f'color:{PALETTE["muted"]}">No stocks qualified today.</td></tr>'
-        )
-
-    link_html = (
-        f'<p style="margin:16px 0 0"><a href="{report_url}" '
-        f'style="color:{PALETTE["accent"]};font-weight:600">View full report →</a></p>'
-        if report_url else ""
+    history = paper.equity_history
+    ret = (paper.equity / paper.start_capital - 1.0) * 100.0 if paper.start_capital else 0.0
+    bench = ""
+    if len(history) >= 2:
+        b0, b1 = float(history[0]["benchmark_close"]), float(history[-1]["benchmark_close"])
+        bench = f" · Nifty500 {(b1 / b0 - 1.0) * 100.0:+.2f}% over the same period" if b0 else ""
+    summary = (
+        f'<p style="margin:4px 0 0;font-size:24px;font-weight:700">₹{paper.equity:,.0f} '
+        f'<span style="font-size:15px;color:{PALETTE["green"] if ret >= 0 else PALETTE["red"]}">{ret:+.2f}%</span></p>'
+        f'<p style="margin:2px 0 0;font-size:12px;color:{PALETTE["muted"]}">started ₹{paper.start_capital:,.0f}{bench} · '
+        f'{len(paper.positions)} open · cash ₹{paper.cash:,.0f}</p>'
     )
+
+    orders = _email_table(
+        ["Ticker", "Sector", "Qty", "Signal close", "Stop"],
+        [[escape(r["ticker"]), escape(r["sector"]), r["quantity"], f'₹{float(r["signal_price"]):,.2f}',
+          f'₹{float(r["signal_price"]) - float(r["stop_distance"]):,.2f}'] for r in paper.booked_today],
+        "No new orders today.",
+    )
+    sold = _email_table(
+        ["Ticker", "Qty", "Exit", "P&L", "Reason"],
+        [[escape(r["ticker"]), r["quantity"], f'₹{float(r["exit_price"]):,.2f}', _pnl(float(r["pnl"])),
+          escape(r["exit_reason"])] for r in paper.closed_today],
+        "Nothing sold today.",
+    )
+    bought = _email_table(
+        ["Ticker", "Qty", "Entry", "Stop"],
+        [[escape(r["ticker"]), r["quantity"], f'₹{float(r["entry_price"]):,.2f}', f'₹{float(r["initial_stop"]):,.2f}']
+         for r in paper.filled_today],
+        "Nothing bought today.",
+    )
+
+    links = " · ".join(
+        f'<a href="{escape(url)}" style="color:{PALETTE["accent"]};font-weight:600">{label}</a>'
+        for label, url in (("Open dashboard →", dashboard_url), ("Full screening report", report_url)) if url
+    )
+    link_html = f'<p style="margin:16px 0 0">{links}</p>' if links else ""
 
     error_block = ""
     if errors:
@@ -98,28 +145,16 @@ def build_summary_email(
     <h1 style="margin:0;font-size:20px">📊 Sector Screener Summary</h1>
     <p style="margin:6px 0 0;color:#bae6fd;font-size:13px">{today} · NSE India</p>
   </div>
-  <div style="background:{PALETTE['card']};padding:16px 24px;border-left:4px solid {PALETTE['accent']}">
-    <p style="margin:0;font-size:11px;text-transform:uppercase;letter-spacing:1px;color:{PALETTE['muted']}">
-      Leading Sector(s)</p>
-    <p style="margin:4px 0 0;font-size:20px;font-weight:700;color:{PALETTE['accent']}">{sector_line}</p>
-  </div>
-  <div style="background:{PALETTE['card']}">
-    <table style="width:100%;border-collapse:collapse;font-size:13px">
-      <thead><tr style="background:{PALETTE['bg']};text-transform:uppercase;font-size:10px;
-                  letter-spacing:0.6px;color:{PALETTE['muted']}">
-        <th style="padding:8px 12px;text-align:left">Ticker</th>
-        <th style="padding:8px 12px;text-align:right">Price</th>
-        <th style="padding:8px 12px;text-align:right">Qty</th>
-        <th style="padding:8px 12px;text-align:right">% Capital</th>
-      </tr></thead>
-      <tbody>{row_html}</tbody>
-    </table>
-  </div>
+  {_section("Paper portfolio", summary)}
+  {_section("Orders for the next open", orders)}
+  {_section("Bought today", bought)}
+  {_section("Sold today", sold)}
+  {_section("Leading sectors", f'<p style="margin:4px 0 0;font-size:15px;font-weight:600;color:{PALETTE["accent"]}">{escape(sector_line)}</p>')}
   {link_html}
   {error_block}
   <p style="margin-top:20px;font-size:11px;color:{PALETTE['muted']};line-height:1.6">
-    Informational only, not financial advice. Full rationale, formulas, and the sector
-    rotation table are in the linked report.
+    Paper trading only — no real money, not financial advice. Orders fill at the next
+    session's opening price; every position, trade and chart is on the dashboard.
   </p>
 </div>
 </body>

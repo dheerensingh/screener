@@ -41,6 +41,8 @@ day's "leading sectors" — only these are screened for momentum stocks.
 
 ## 3. Market Regime Filter
 
+> **Since 2026-10-01 this filter is informational only — it no longer gates entries.** See §16 for the backtest evidence.
+
 New entries are paused entirely — system-wide, regardless of sector or stock
 signal — unless **both**:
 - the Nifty500 benchmark's close is above its own 200-day SMA, **and**
@@ -462,6 +464,8 @@ backtest has yet shown.
 
 ## 10. Forward Paper-Trading Plan
 
+> **Superseded on 2026-10-01 by the built-in paper account (§16).** TradingView has no API to accept orders, so the steps below can only ever be a manual mirror — optional, not needed for the test. The automatic account and its dashboard are the record now.
+
 **Platform: TradingView** (free plan). Researched India-specific alternatives
 (StockGro, PaperTradingApp, MegaBull — all free but more gamified, less
 suited to systematically logging a rules-based strategy). TradingView's free
@@ -782,3 +786,80 @@ prepared for the real index's actual -72.5% drawdown depth, not this
 backtest's -33%. Path A (genuine point-in-time constituent data) remains the
 only route to a number from *this project's own tooling* that would actually
 deserve to be trusted, and is still open as a future investigation.
+
+## 16. Market filter removed; built-in paper account and dashboard (2026-10-01)
+
+**The 200-day market filter (§3) no longer gates entries.** The user's reasoning:
+some sector is always leading, so a market-wide pause throws away good trades.
+Measured before changing anything, on the 8.8-year backtest, same run and same
+universe for each pair:
+
+| Entry | Exit | Market filter | Trades | Win % | CAGR | Max DD | Sharpe | Calmar |
+|---|---|---|---|---|---|---|---|---|
+| Trend Template | Trailing | ON | 592 | 37.3 | +7.3% | -48.0% | 0.46 | 0.15 |
+| Trend Template | Trailing | **OFF** | 1,196 | 36.1 | **+13.9%** | -48.9% | **0.60** | **0.28** |
+| Trend Template | Scale-out | ON | 619 | 38.1 | +6.9% | -45.8% | 0.45 | 0.15 |
+| Trend Template | Scale-out | OFF | 1,248 | 36.6 | +13.7% | -47.6% | 0.60 | 0.29 |
+| RSI+MACD only | Trailing | ON | 648 | 36.1 | +8.1% | -54.6% | 0.47 | 0.15 |
+| RSI+MACD only | Trailing | OFF | 1,476 | 35.8 | +14.3% | -63.3% | 0.66 | 0.23 |
+| *Nifty500 buy & hold* | | | | | +11.3% | -38.3% | 0.74 | 0.29 |
+
+For the live configuration (Trend Template entry) removing the filter nearly
+doubles CAGR while max drawdown barely moves, and Calmar rises to match the
+index's. The reason shows in the RSI+MACD rows: without a stock-level trend
+check, removing the market filter deepens the drawdown sharply (-54.6% →
+-63.3%). The Trend Template already makes *each stock* prove its own uptrend,
+which does most of what the market filter was for. So: off for the Trend
+Template configuration only. `market_regime.py` still runs and is shown on the
+dashboard as context; `BacktestConfig.apply_market_regime_filter` now
+defaults to `False` so the backtest keeps matching live, and stays switchable.
+
+Honest reading: +13.9% CAGR beats the index's +11.3% but with a deeper
+drawdown (-48.9% vs -38.3%) and a lower Sharpe (0.60 vs 0.74) — roughly
+index-like risk-adjusted, not clearly better. The forward paper test is what
+decides it. (Absolute numbers here differ slightly from §8b's because
+`build_universe()` reads NSE's *current* constituent lists, which changed at
+the end-September reconstitution; each ON/OFF pair above is like-for-like.)
+
+**Built-in paper account (`modules/paper_trader.py`).** TradingView has no API
+that accepts orders, so it could never be automated. The project now runs its
+own paper account, starting at ₹5,00,000:
+
+- Orders are placed after the close and **fill at the next session's open**,
+  the same convention as the backtest. An order is cancelled if the stock
+  opens at or below its stop, and cut to the cash available.
+- Exits follow §5 exactly, replayed **bar by bar** from the entry date, so a
+  missed daily run never skips a stop. RSI-failure exits happen at the *next*
+  open after RSI closes below 45, never the same day.
+- Costs of 0.15% per side (STT alone is 0.1% each way on delivery), more
+  conservative than the backtest's 0.1% round trip, deliberately.
+- New orders skip anything already held and count held positions toward the
+  2-per-sector cap, the 85% capital cap and the 8% heat cap. Before this, the
+  live allocator re-sized from scratch daily and could buy the same stock
+  every day it qualified. That never surfaced only because the market filter
+  had blocked every entry.
+- State is two committed CSVs: `paper_trades.csv` (every order's lifecycle)
+  and `paper_equity.csv` (one row per session). Cash is re-derived from the
+  ledger each run; start + realized + unrealized reconciles to equity exactly.
+
+Verified before going live: test orders on cached history filled at the
+correct next-session open; RELIANCE and TCS were replayed by hand bar by bar
+(stop levels, trailing ratchet, exit day and price matched the engine); and a
+45-session day-by-day replay confirmed no stock was ever held twice, no
+sector exceeded 2 positions, cash never went negative, and the accounting
+reconciled to the paisa.
+
+**Dashboard (`docs/index.html`, `modules/dashboard.py`).** The site's front
+page is now the paper account: equity vs Nifty500, drawdown, P&L per closed
+trade, sector exposure, today's sector ranking, and tables for open
+positions (with trailing stop and room-to-stop), pending orders, closed
+trades, and every screening candidate with the portfolio's decision. The
+daily screening report moved to `docs/latest.html`; both CSVs are
+downloadable from `docs/data/`.
+
+**Schedule.** The 08:00 IST run never arrived on time: GitHub's scheduler
+had started it 4–6 hours late on every recorded day, and on 2026-10-01
+it still hadn't started by 14:35 IST. It now runs at 17:00 IST, after the close and on the
+day's final prices, with a 21:00 IST backup that skips itself if the first
+already published. Even with GitHub's usual delay, the email lands before
+the next morning's open.

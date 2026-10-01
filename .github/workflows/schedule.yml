@@ -1,41 +1,59 @@
 name: Daily Stock Screener
 
 on:
-  # Fires at 08:00 IST (= 02:30 UTC) every weekday (Mon–Fri).
-  # GitHub Actions cron uses UTC; IST = UTC + 5h30m.
+  # Weekday evenings, after the NSE close (15:30 IST), on that day's full
+  # end-of-day data. GitHub's scheduler routinely starts jobs hours late and
+  # sometimes skips a slot, so there are two: the backup exits early if the
+  # first already published today's report.
+  #   11:30 UTC = 17:00 IST (primary)   15:30 UTC = 21:00 IST (backup)
   schedule:
-    - cron: "30 2 * * 1-5"
+    - cron: "30 11 * * 1-5"
+    - cron: "30 15 * * 1-5"
 
-  # Allow a manual trigger from the Actions tab (useful for testing).
+  # Manual trigger from the Actions tab (always runs).
   workflow_dispatch:
 
 permissions:
-  contents: write   # needed to commit the generated docs/ report back to the repo
+  contents: write   # commit the report, dashboard and paper-trading files back to the repo
+
+concurrency:
+  group: daily-screener
+  cancel-in-progress: false
 
 jobs:
   run-screener:
     name: Run Sector Rotation Screener
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
 
     steps:
-      # ── 1. Checkout code ──────────────────────────────────────────────────
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      # ── 2. Set up Python 3.11 ─────────────────────────────────────────────
+      - name: Skip if today's report already exists
+        id: guard
+        if: github.event_name == 'schedule'
+        run: |
+          if [ -f "docs/reports/$(date -u +%Y-%m-%d).html" ]; then
+            echo "Today's report is already published — backup run skipping."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Set up Python
+        if: steps.guard.outputs.skip != 'true'
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: "pip"
 
-      # ── 3. Install dependencies ───────────────────────────────────────────
       - name: Install dependencies
+        if: steps.guard.outputs.skip != 'true'
         run: pip install --upgrade pip && pip install -r requirements.txt
 
-      # ── 4. Run screener ───────────────────────────────────────────────────
       - name: Run screener
+        if: steps.guard.outputs.skip != 'true'
         env:
           # Secrets set in: GitHub repo → Settings → Secrets and variables → Actions
           SENDER_EMAIL:         ${{ secrets.SENDER_EMAIL }}
@@ -43,34 +61,31 @@ jobs:
           RECEIVER_EMAIL:       ${{ secrets.RECEIVER_EMAIL }}
           TRADING_ACCOUNT_SIZE: ${{ secrets.TRADING_ACCOUNT_SIZE || '500000' }}
           RISK_PCT_PER_TRADE:   ${{ secrets.RISK_PCT_PER_TRADE || '1.0' }}
-          # e.g. https://<user>.github.io/<repo> — used for the email's report link
           PAGES_BASE_URL:       ${{ secrets.PAGES_BASE_URL }}
         run: python main.py
 
-      # ── 5. Publish the generated report + commit the paper-trade log ──────
-      # paper_trades.csv is the ONLY persistent state this project has
-      # (see modules/paper_trade_log.py) — each Actions run starts from a
-      # fresh checkout, so this file MUST be committed back every run or the
-      # 3-month paper-trading log would silently reset to empty daily and
-      # check_exits() would never see a prior day's open positions.
-      # Runs even if the screener step failed (e.g. email not configured) — the
-      # report and paper-trade log are the product; email is just delivery.
-      - name: Commit + push docs/ report and paper trade log
-        if: success() || failure()
+      # Runs even if the screener step failed (e.g. email) — the report, dashboard
+      # and paper-trading files are the product; email is just delivery.
+      # paper_trades.csv / paper_equity.csv are the paper account's ONLY state
+      # (see modules/paper_trader.py); every run starts from a fresh checkout, so
+      # they must be committed back or the account would reset daily.
+      - name: Commit + push report, dashboard and paper account
+        if: steps.guard.outputs.skip != 'true' && (success() || failure())
         run: |
           git config user.name "screener-bot"
           git config user.email "actions@github.com"
           git add docs
-          # Only exists once the first trade has been logged.
-          if [ -f paper_trades.csv ]; then git add paper_trades.csv; fi
+          for f in paper_trades.csv paper_equity.csv; do
+            if [ -f "$f" ]; then git add "$f"; fi
+          done
           if ! git diff --cached --quiet; then
             git commit -m "docs: publish screener report $(date -u +%Y-%m-%d)"
+            git pull --rebase origin main
             git push
           else
-            echo "No changes under docs/ or paper_trades.csv — nothing to publish."
+            echo "Nothing changed — nothing to publish."
           fi
 
-      # ── 6. Upload logs on failure ─────────────────────────────────────────
       - name: Upload log artifact on failure
         if: failure()
         uses: actions/upload-artifact@v4

@@ -1,35 +1,34 @@
 """
-Sector-Rotation + Momentum Stock Screener
+Sector-Rotation + Momentum Stock Screener, with a built-in paper-trading account.
 Entry point — orchestrates all pipeline modules.
 
 Pipeline:
   1. Rank all NSE sectors (full Nifty500 universe) by relative strength vs the
      benchmark (sector_rotation.py); also get universe-wide RS Ratings + the
-     raw benchmark series for the market-regime check.
-  1b. Market regime filter (market_regime.py): pause new entries entirely if
-      the Nifty500 benchmark isn't in its own uptrend.
+     raw benchmark series.
+  1b. Market regime (market_regime.py) and FII/DII flow — informational only.
+      The 200-day market filter stopped gating entries on 2026-10-01 (STRATEGY.md §16).
   2. Confirm the leading sector(s) with YoY profit-growth data (fundamental_analyzer.py)
   3. Screen the leading sector(s)' baskets for momentum stocks — RSI/MACD +
      Minervini's Trend Template/RS Rating gate (technical_analyzer.py, trend_template.py)
   3a. Governance gate on the qualified stocks — reject any with a confirmed
-      promoter share pledge (governance_analyzer.py); a declining promoter
-      holding trend is surfaced but does not gate (see STRATEGY.md §12).
-  3b. Allocate the portfolio across sectors — per-sector cap, budget-aware
-      sizing, portfolio-heat ceiling, cap-band risk scaling (portfolio_allocator.py,
-      position_sizer.py)
-  3c. Log today's accepted signals for the paper-trading forward test (paper_trade_log.py)
-  4. Publish an HTML report to docs/ for GitHub Pages (report_generator.py)
-  5. Send a short summary email with a link to the report (email_alerter.py)
+      promoter share pledge (governance_analyzer.py).
+  3b. Paper account (paper_trader.py): fill yesterday's orders at today's open,
+      apply exit rules to open positions, mark everything to market.
+  3c. Allocate new orders around what's already held — per-sector cap, budget-
+      aware sizing, portfolio-heat ceiling, cap-band risk (portfolio_allocator.py)
+      — and book them as pending orders for the next open.
+  4. Publish the screening report and the paper-trading dashboard to docs/
+     (report_generator.py, dashboard.py) for GitHub Pages.
+  5. Send a summary email linking to both (email_alerter.py).
 
 Run locally:
   pip install -r requirements.txt
   cp .env.example .env && fill in your credentials
   python main.py
 
-Run via GitHub Actions:
-  Push to main → Actions → "Daily Stock Screener" workflow fires at 08:00 IST.
-
-See CLAUDE.md for the architecture/data-source decisions behind this pipeline.
+Run via GitHub Actions: weekday evenings after the NSE close — see
+.github/workflows/schedule.yml. See CLAUDE.md for the architecture.
 """
 
 import logging
@@ -53,8 +52,9 @@ from modules.fii_dii_flow import fetch_latest_flow
 from modules.portfolio_allocator import allocate as allocate_portfolio
 from modules.position_sizer import get_account_size
 from modules.report_generator import SectorBundle, build_report_html, publish_report
+from modules.paper_trader import PaperTrader
+from modules.dashboard import build_dashboard_html, publish_dashboard
 from modules.email_alerter import build_summary_email, send_email, send_error_email
-from modules.paper_trade_log import check_exits, log_signals
 
 logging.basicConfig(
     level=logging.INFO,
@@ -90,14 +90,9 @@ def main() -> int:
         send_error_email(errors)
         return 1
 
-    # ── Step 1b: Market regime — pause NEW entries if the broad market isn't
-    #             in an uptrend (existing positions aren't tracked by this repo
-    #             yet, so this only affects whether today generates new signals) ──
+    # ── Step 1b: Market context (informational only) ─────────────────────────
     regime = evaluate_market_regime(rotation.benchmark, breadth_pct=rotation.breadth_pct)
-    logger.info("Market regime: %s", regime.reason)
-    if not regime.in_uptrend:
-        errors.append(f"Market regime filter: {regime.reason} — no new entries today.")
-
+    logger.info("Market regime (informational): %s", regime.reason)
     try:
         flow = fetch_latest_flow()
         if flow.error:
@@ -111,10 +106,11 @@ def main() -> int:
         logger.warning("FII/DII flow check crashed (non-fatal): %s", exc)
         flow = None
 
-    # ── Step 2: Per leading sector — fundamentals + screening ────────────────
+    # ── Step 2-3a: Per leading sector — fundamentals, screening, governance ──
     account_size = get_account_size()
     bundles: list[SectorBundle] = []
     sector_qualifiers: dict[str, list] = {}
+    governance_rejects: list[tuple] = []  # (ScreenResult, sector, reason)
 
     for score in leading:
         sector = score.sector
@@ -138,9 +134,7 @@ def main() -> int:
                 score.data, sector_index=score.synthetic_index, cap_bands=score.cap_bands,
                 rs_ratings=rotation.rs_ratings, delivery_pct=delivery_pct,
             )
-            logger.info(
-                "  [%s] %d / %d stocks qualify", sector, len(qualified), len(all_results),
-            )
+            logger.info("  [%s] %d / %d stocks qualify", sector, len(qualified), len(all_results))
         except Exception as exc:
             msg = f"Momentum screening failed for {sector}: {exc}"
             logger.warning(msg)
@@ -150,13 +144,12 @@ def main() -> int:
         try:
             if qualified:
                 logger.info("Step 3a [%s]: Governance check on %d qualifier(s) ...", sector, len(qualified))
-                governance_results, governance_summary = sector_governance_check(
-                    [r.ticker for r in qualified]
-                )
-                pledge_flagged = {gr.ticker for gr in governance_results if gr.pledge_flag}
-                if pledge_flagged:
-                    logger.info("  [%s] Governance gate rejected (pledge): %s", sector, pledge_flagged)
-                qualified = [r for r in qualified if r.ticker not in pledge_flagged]
+                governance_results, governance_summary = sector_governance_check([r.ticker for r in qualified])
+                pledged = {gr.ticker: gr.pledge_text for gr in governance_results if gr.pledge_flag}
+                if pledged:
+                    logger.info("  [%s] Governance gate rejected (pledge): %s", sector, sorted(pledged))
+                governance_rejects += [(r, sector, f"Rejected: {pledged[r.ticker]}") for r in qualified if r.ticker in pledged]
+                qualified = [r for r in qualified if r.ticker not in pledged]
             else:
                 governance_results, governance_summary = [], "No qualifiers to check"
         except Exception as exc:
@@ -177,83 +170,92 @@ def main() -> int:
             governance_results=governance_results,
         ))
 
-    # ── Step 3b: Portfolio-level allocation (Gap 2 — per-sector cap, budget-aware
-    #             sizing, portfolio-heat ceiling, cap-band risk scaling) ─────────
-    if regime.in_uptrend:
-        try:
-            logger.info("Step 3b: Allocating portfolio across %d sectors' qualifiers ...", len(sector_qualifiers))
-            allocation = allocate_portfolio(sector_qualifiers, account_size=account_size)
-            logger.info(
-                "  Accepted %d, rejected %d — deployed %.1f%% capital, %.1f%% heat",
-                len(allocation.accepted), len(allocation.rejected),
-                allocation.total_deployed_pct, allocation.total_heat_pct,
-            )
-            accepted_by_ticker = {r.ticker: pos for r, pos in allocation.accepted}
-            for bundle in bundles:
-                bundle.position_sizes = {
-                    t: pos for t, pos in accepted_by_ticker.items()
-                    if t in {r.ticker for r in bundle.qualified}
-                }
-        except Exception as exc:
-            msg = f"Step 3b (portfolio allocation) crashed: {exc}"
-            logger.exception(msg)
-            errors.append(msg)
-    else:
-        logger.info("Step 3b: Skipped (market regime not in uptrend) — no positions sized today.")
+    # ── Step 3b-3c: Paper account — fills, exits, then new orders ────────────
+    trader = PaperTrader(start_capital=account_size)
+    candidates: list[dict] = []
+    try:
+        logger.info("Step 3b: Updating paper account (fills, exits, mark-to-market) ...")
+        price_data = {t: df for s in rotation.scores for t, df in s.data.items()}
+        trader.update(price_data)
+        logger.info(
+            "  As of %s: %d filled, %d closed, %d cancelled, %d open",
+            trader.as_of, len(trader.filled_today), len(trader.closed_today),
+            len(trader.cancelled_today), len(trader.positions),
+        )
 
-    # ── Step 3c: Paper-trade log — close positions that hit an exit rule, then
-    #             log today's newly-accepted entries ───────────────────────────
-    try:
-        closed = check_exits()
-        if closed:
-            logger.info("Paper trade log: %d position(s) closed today.", closed)
-    except Exception as exc:
-        logger.warning("Paper-trade exit check failed (non-fatal): %s", exc)
-    try:
-        log_signals(bundles)
-    except Exception as exc:
-        logger.warning("Paper-trade logging failed (non-fatal): %s", exc)
+        logger.info("Step 3c: Allocating new orders around current holdings ...")
+        deployed_pct, heat_pct = trader.exposure_pct(account_size)
+        allocation = allocate_portfolio(
+            sector_qualifiers, account_size=account_size,
+            existing_deployed_pct=deployed_pct, existing_heat_pct=heat_pct,
+            held_tickers=trader.held_tickers(), held_per_sector=trader.held_per_sector(),
+        )
+        sector_of = {r.ticker: sector for sector, rs in sector_qualifiers.items() for r in rs}
+        trader.book(allocation.accepted, sector_of)
+        logger.info(
+            "  Booked %d order(s), rejected %d — %.1f%% capital, %.1f%% heat committed",
+            len(trader.booked_today), len(allocation.rejected),
+            allocation.total_deployed_pct, allocation.total_heat_pct,
+        )
 
-    # ── Step 4: Build + publish the HTML report ───────────────────────────────
-    report_url = None
+        accepted_by_ticker = {r.ticker: pos for r, pos in allocation.accepted}
+        for bundle in bundles:
+            bundle.position_sizes = {r.ticker: accepted_by_ticker[r.ticker]
+                                     for r in bundle.qualified if r.ticker in accepted_by_ticker}
+
+        decisions = {r.ticker: f"Order placed: {pos.quantity} shares for next open" for r, pos in allocation.accepted}
+        decisions.update({r.ticker: reason for r, reason in allocation.rejected})
+        for sector, results in sector_qualifiers.items():
+            for r in results:
+                candidates.append(dict(ticker=r.ticker, sector=sector, cap_band=r.cap_band, price=r.current_price,
+                                       rsi=r.rsi, strength=r.strength_score, decision=decisions.get(r.ticker, "—")))
+        for r, sector, reason in governance_rejects:
+            candidates.append(dict(ticker=r.ticker, sector=sector, cap_band=r.cap_band, price=r.current_price,
+                                   rsi=r.rsi, strength=r.strength_score, decision=reason))
+
+        bench = rotation.benchmark.dropna()
+        bench_close = float(bench.loc[:trader.as_of].iloc[-1]) if trader.as_of else float(bench.iloc[-1])
+        trader.snapshot(bench_close)
+        trader.save()
+    except Exception as exc:
+        msg = f"Step 3b/3c (paper account) crashed: {exc}"
+        logger.exception(msg)
+        errors.append(msg)
+    paper = trader.state()
+
+    # ── Step 4: Publish the screening report + dashboard ─────────────────────
+    pages_base = os.environ.get("PAGES_BASE_URL", "").rstrip("/")
+    report_url = dashboard_url = None
     try:
-        logger.info("Step 4: Building + publishing HTML report ...")
+        logger.info("Step 4: Building + publishing HTML report and dashboard ...")
         html = build_report_html(all_scores, bundles, account_size, errors, regime=regime, flow=flow)
         dated_path, _ = publish_report(html)
-        pages_base = os.environ.get("PAGES_BASE_URL", "").rstrip("/")
+        publish_dashboard(build_dashboard_html(
+            paper, all_scores, {s.sector for s in leading}, candidates, regime, flow,
+        ))
         if pages_base:
             report_url = f"{pages_base}/{os.path.relpath(dated_path, 'docs')}"
+            dashboard_url = f"{pages_base}/"
     except Exception as exc:
-        msg = f"Step 4 (report generation) crashed: {exc}"
+        msg = f"Step 4 (report/dashboard generation) crashed: {exc}"
         logger.exception(msg)
         errors.append(msg)
 
     # ── Step 5: Send summary email ─────────────────────────────────────────────
     try:
         logger.info("Step 5: Sending summary email ...")
-        qualified_rows = [
-            (r.ticker, r.current_price,
-             bundle.position_sizes[r.ticker].quantity if r.ticker in bundle.position_sizes else 0,
-             bundle.position_sizes[r.ticker].allocation_pct if r.ticker in bundle.position_sizes else 0.0)
-            for bundle in bundles for r in bundle.qualified
-        ]
         html = build_summary_email(
-            leading_sectors=[b.score.sector for b in bundles],
-            qualified_rows=qualified_rows,
-            report_url=report_url,
-            errors=errors,
+            leading_sectors=[b.score.sector for b in bundles], paper=paper,
+            dashboard_url=dashboard_url, report_url=report_url, errors=errors,
         )
-        today_str = datetime.now().strftime("%d %b %Y")
-        total_qualified = sum(len(b.qualified) for b in bundles)
-        subject = f"📊 Sector Screener: {total_qualified} stock(s) qualify — {today_str}"
-
-        sent = send_email(html, subject)
-        if sent:
+        ret = (paper.equity / paper.start_capital - 1.0) * 100.0 if paper.start_capital else 0.0
+        subject = (f"📊 Paper portfolio ₹{paper.equity:,.0f} ({ret:+.2f}%) · "
+                   f"{len(paper.booked_today)} new order(s) — {datetime.now():%d %b %Y}")
+        if send_email(html, subject):
             logger.info("Email delivered successfully.")
         else:
             logger.error("Email delivery failed — check SMTP credentials in environment.")
             return 1
-
     except Exception as exc:
         logger.exception("Step 5 (email) crashed: %s", exc)
         return 1

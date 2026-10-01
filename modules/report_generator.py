@@ -5,7 +5,7 @@ Renders the full daily report (sector rotation table, fundamental confirmation,
 qualifying momentum stocks with position sizing) as a styled HTML page, reusing
 email_alerter.PALETTE for a consistent look. Publishes it to `docs/` for GitHub
 Pages: a permanent dated copy under `docs/reports/`, an overwritten
-`docs/index.html` so the Pages root always shows the latest run, and a
+`docs/latest.html` so the newest report has a stable URL, and a
 regenerated `docs/reports/index.html` archive list.
 """
 
@@ -251,6 +251,7 @@ def build_report_html(
     <h1 style="margin:0;font-size:22px">📊 Sector Rotation + Momentum Screener</h1>
     <p style="margin:6px 0 0;color:#bae6fd;font-size:14px">
       {today_str} · NSE India · Account size ₹{account_size:,.0f}</p>
+    <p style="margin:8px 0 0;font-size:13px"><a href="../index.html" style="color:#e0f2fe;font-weight:600">← Paper trading dashboard</a></p>
   </div>
 
   <div style="background:{PALETTE['card']};padding:20px 28px;border-radius:0 0 8px 8px;
@@ -316,7 +317,7 @@ def _archive_index_html(report_dates: list[str]) -> str:
 <div style="max-width:480px;margin:0 auto">
   <h1 style="font-size:18px">Report Archive</h1>
   <ul style="list-style:none;padding:0;margin:0">{items}</ul>
-  <p style="margin-top:20px"><a href="../index.html" style="color:{PALETTE['accent']}">← Latest report</a></p>
+  <p style="margin-top:20px"><a href="../index.html" style="color:{PALETTE['accent']}">← Dashboard</a></p>
 </div>
 </body></html>"""
 
@@ -324,10 +325,11 @@ def _archive_index_html(report_dates: list[str]) -> str:
 def publish_report(html: str, docs_dir: str = DOCS_DIR, date: Optional[datetime] = None) -> tuple[str, str]:
     """
     Writes the report to docs/reports/YYYY-MM-DD.html (permanent), overwrites
-    docs/index.html with the same content (Pages root = latest run), and
-    regenerates docs/reports/index.html as an archive list.
+    docs/latest.html with the same content, and regenerates
+    docs/reports/index.html as an archive list. (docs/index.html is the paper
+    trading dashboard — see dashboard.py.)
 
-    Returns (dated_report_path, index_path).
+    Returns (dated_report_path, latest_path).
     """
     date = date or datetime.now()
     date_str = date.strftime("%Y-%m-%d")
@@ -339,9 +341,9 @@ def publish_report(html: str, docs_dir: str = DOCS_DIR, date: Optional[datetime]
     with open(dated_path, "w", encoding="utf-8") as f:
         f.write(html)
 
-    index_path = os.path.join(docs_dir, "index.html")
-    with open(index_path, "w", encoding="utf-8") as f:
-        f.write(html)
+    latest_path = os.path.join(docs_dir, "latest.html")
+    with open(latest_path, "w", encoding="utf-8") as f:
+        f.write(html.replace('href="../index.html"', 'href="index.html"'))
 
     existing_dates = [
         fn[:-5] for fn in os.listdir(reports_dir)
@@ -351,5 +353,5 @@ def publish_report(html: str, docs_dir: str = DOCS_DIR, date: Optional[datetime]
     with open(archive_path, "w", encoding="utf-8") as f:
         f.write(_archive_index_html(existing_dates))
 
-    logger.info("Report published: %s (+ index.html, + archive)", dated_path)
-    return dated_path, index_path
+    logger.info("Report published: %s (+ latest.html, + archive)", dated_path)
+    return dated_path, latest_path
