@@ -27,7 +27,8 @@ Run locally:
   cp .env.example .env && fill in your credentials
   python main.py
 
-Run via GitHub Actions: weekday evenings after the NSE close — see
+Run via GitHub Actions: every weekday after the NSE close (18:17 IST, with overnight
+backups) — see
 .github/workflows/schedule.yml. See CLAUDE.md for the architecture.
 """
 
@@ -228,8 +229,13 @@ def main() -> int:
     report_url = dashboard_url = None
     try:
         logger.info("Step 4: Building + publishing HTML report and dashboard ...")
-        html = build_report_html(all_scores, bundles, account_size, errors, regime=regime, flow=flow)
-        dated_path, _ = publish_report(html)
+        # Named by the market session the data is from, not the calendar date of the
+        # run — a late-evening and an early-morning run of the same session then land
+        # on the same file, which is what the workflow's skip-guard checks for.
+        session = datetime.strptime(trader.as_of, "%Y-%m-%d") if trader.as_of else None
+        html = build_report_html(all_scores, bundles, account_size, errors, generated_at=session,
+                                 regime=regime, flow=flow)
+        dated_path, _ = publish_report(html, date=session)
         publish_dashboard(build_dashboard_html(
             paper, all_scores, {s.sector for s in leading}, candidates, regime, flow,
         ))

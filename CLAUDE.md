@@ -77,12 +77,19 @@ it into the full pipeline above, `instruction.md` for how to work on this repo, 
 by both sector rotation and per-stock screening — pulls OHLCV from `yfinance` in chunks
 of 100 tickers, handling its MultiIndex column layout, requiring ≥60 rows of history.
 
-Deployment: `.github/workflows/schedule.yml` runs on weekday evenings after the NSE
-close — 17:00 IST, plus a 21:00 IST backup that skips itself if the report already
-exists (GitHub's scheduler started the old 08:00 run 4-6 hours late every day) — and
-on manual `workflow_dispatch`. It runs `python main.py`, then commits `docs/**`,
+Deployment: `.github/workflows/schedule.yml` runs every weekday after the NSE close —
+18:17 IST primary, with backups at 21:47, 01:17 and 05:47 IST, because GitHub's
+scheduler started jobs 5-8 hours late (2026-10). Whichever slot runs first processes
+the latest completed session and writes it to `docs/data/last_session.txt`; the rest
+see it and exit in seconds. Manual `workflow_dispatch` always runs (untick `force` to
+get the same skip). The checkout is always the latest `main`, never the run's original
+commit — "Re-run" on an old run used to check out a stale paper account and then fail
+to push (2026-10-06). It runs `python main.py`, then commits `docs/**`,
 `paper_trades.csv` and `paper_equity.csv` back to `main` even if email failed, so
-GitHub Pages picks up the new report and the paper account persists.
+GitHub Pages picks up the new report and the paper account persists. Reports are named
+by market session date (`trader.as_of`), not the run's calendar date. Runs during
+market hours are safe: `stock_fetcher.drop_unsettled_bar` drops today's live bar
+before 16:00 IST, so signals and the paper account only ever see completed sessions.
 
 **Retired:** `modules/twitter_extractor.py` (sentiment-based sector detection) and
 `modules/stock_universe.py` (broad-market ~500-ticker fallback) were deleted — the new
