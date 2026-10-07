@@ -28,16 +28,17 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(na
                     handlers=[logging.StreamHandler(sys.stdout)])
 logger = logging.getLogger("backtest.portfolio")
 
-BASE = BacktestConfig(entry_paradigm="trend_template", exit_paradigm="trailing")
+BASE = BacktestConfig(entry_paradigm="trend_template", exit_paradigm="trailing")  # = live settings
+OLD = replace(BASE, weighted_sector_slots=False, max_total_positions=8, allow_pyramiding=False, risk_scale=1.0)
 VARIANTS = [
-    ("Old: 2/sector, max 8, no adds", replace(BASE, weighted_sector_slots=False, max_total_positions=8,
-                                              allow_pyramiding=False)),
-    ("15 weighted, no adds", replace(BASE, allow_pyramiding=False)),
-    ("15 weighted + adds", BASE),
-    ("15 weighted + adds, risk x0.75", replace(BASE, risk_scale=0.75)),
+    ("Old: 2/sector, max 8, no adds", OLD),
+    ("Old, market filter ON", replace(OLD, apply_market_regime_filter=True)),
+    ("15 weighted, no adds", replace(BASE, allow_pyramiding=False, risk_scale=1.0)),
+    ("15 weighted + adds", replace(BASE, risk_scale=1.0)),
+    ("15 weighted + adds, risk x0.75 (live)", BASE),
     ("15 weighted + adds, risk x0.6", replace(BASE, risk_scale=0.6)),
-    ("15 weighted + adds, risk x0.6, heat 10%", replace(BASE, risk_scale=0.6, max_portfolio_heat_pct=10.0)),
-    ("15 weighted, no adds, risk x0.6", replace(BASE, risk_scale=0.6, allow_pyramiding=False)),
+    ("15 weighted, no adds, risk x0.75", replace(BASE, allow_pyramiding=False)),
+    ("Live, market filter ON", replace(BASE, apply_market_regime_filter=True)),
 ]
 
 

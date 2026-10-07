@@ -38,7 +38,7 @@ import pandas as pd
 
 from modules.portfolio_allocator import (
     CAP_BAND_RISK_PCT, MAX_DEPLOYED_CAPITAL_PCT, MAX_PORTFOLIO_HEAT_PCT, MAX_TOTAL_POSITIONS,
-    Holding, add_blocker, add_risk_fraction, sector_slots,
+    RISK_SCALE, Holding, add_blocker, add_risk_fraction, sector_slots,
 )
 from modules.position_sizer import DEFAULT_MAX_POSITION_PCT
 from modules.technical_analyzer import _macd, _rsi, atr as compute_atr
@@ -90,11 +90,11 @@ class BacktestConfig:
     require_delivery_above_median: bool = False  # additional entry filter — see STRATEGY.md §13; tested, not assumed
     delivery_median_lookback_days: int = 20
     # Portfolio shape (STRATEGY.md §17). Defaults match live; the pre-2026-10-07
-    # rules are weighted_sector_slots=False, max_total_positions=8, allow_pyramiding=False.
+    # rules are weighted_sector_slots=False, max_total_positions=8, allow_pyramiding=False, risk_scale=1.0.
     max_total_positions: int = MAX_TOTAL_POSITIONS
     weighted_sector_slots: bool = True   # False: a fixed LEGACY_POSITIONS_PER_SECTOR per leading sector
     allow_pyramiding: bool = True        # buy a held winner again at reduced risk
-    risk_scale: float = 1.0              # multiplies every cap-band risk %
+    risk_scale: float = RISK_SCALE       # multiplies every cap-band risk %
     max_portfolio_heat_pct: float = MAX_PORTFOLIO_HEAT_PCT
     max_deployed_capital_pct: float = MAX_DEPLOYED_CAPITAL_PCT
 

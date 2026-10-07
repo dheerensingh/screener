@@ -63,6 +63,10 @@ CAP_BAND_RISK_PCT = {
     "Small": 0.5,
 }
 DEFAULT_RISK_PCT = 0.75  # used when cap_band is unknown/blank
+# Every per-trade risk above is multiplied by this, so positions are smaller and
+# more of the 15 slots fit under the 85% capital cap (0.75 → 0.75% / 0.56% /
+# 0.375%). Chosen from the 9-year backtest in STRATEGY.md §17.
+RISK_SCALE = 0.75
 
 
 @dataclass
@@ -195,7 +199,7 @@ def allocate(
         if h is None and positions >= max_total_positions:
             result.rejected.append((r, f"Portfolio at {max_total_positions} stocks"))
             continue
-        risk_pct = CAP_BAND_RISK_PCT.get(r.cap_band, DEFAULT_RISK_PCT)
+        risk_pct = CAP_BAND_RISK_PCT.get(r.cap_band, DEFAULT_RISK_PCT) * RISK_SCALE
         max_position_pct = DEFAULT_MAX_POSITION_PCT
         if h is not None:
             risk_pct *= add_risk_fraction(h)
