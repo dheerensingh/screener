@@ -348,7 +348,8 @@ real index" framing — don't let a future session read this CAGR at face value.
 - **Market filter off.** `main.py` no longer gates allocation on
   `market_regime.evaluate()`; it is logged and shown on the dashboard. Measured
   first: for the Trend Template configuration, CAGR +7.3% → +13.9% with max DD
-  -48.0% → -48.9% over 8.8 years. `BacktestConfig.apply_market_regime_filter`
+  -48.0% → -48.9% over 8.8 years (numbers from the buggy equity curve — see Task 9;
+  re-measured on 2026-10-07 the filter still costs ~4pp CAGR, so off still stands). `BacktestConfig.apply_market_regime_filter`
   defaults to `False` to keep backtest and live identical.
 - **`modules/paper_trader.py`** (`PaperTrader`) — the paper account. Per run:
   fill pending orders at the next session's open (cancel if the open is at or

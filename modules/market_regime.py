@@ -27,7 +27,9 @@ on a signal that didn't cleanly separate the two windows.
 -> +13.9%) for the live Trend Template paradigm while max drawdown barely moved
 (-48.0% -> -48.9%): each stock must already pass its own Trend Template, which
 does the per-stock version of this job. Still evaluated and shown in the report
-as market context.
+as market context. Those figures came from a backtest with an equity-accounting
+bug; re-measured on 2026-10-07 (STRATEGY.md §17) the gate costs ~4pp of CAGR
+(+12.6% -> +8.5%) and saves only ~2-7pp of drawdown, so off still stands.
 """
 
 import logging

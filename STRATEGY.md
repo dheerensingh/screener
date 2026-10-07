@@ -870,3 +870,78 @@ it still hadn't started by 14:35 IST. It now runs at 17:00 IST, after the close 
 day's final prices, with a 21:00 IST backup that skips itself if the first
 already published. Even with GitHub's usual delay, the email lands before
 the next morning's open.
+
+## 17. Wider book, weighted sector slots, adding to winners — and a backtest accounting fix (2026-10-07)
+
+**What changed (user request).** Three rules in `portfolio_allocator.py`, used
+by the paper account and the backtest alike:
+
+1. **Up to 15 stocks** instead of 2 per sector (≤8 in total). New buys still
+   come only from the top 4 sectors.
+2. **Sector shares weighted by relative strength.** Each leading sector gets 2
+   slots; the other 7 are split in proportion to the sector's RS score (the
+   same 50/30/20 1M/3M/6M score that ranks sectors), largest remainder first.
+   Scores 12/8/5/3 → 5/4/3/3 slots. Stocks held in sectors that have since
+   left the top 4 still count toward the 15.
+3. **Adding to winners.** A held stock that qualifies again is bought again if
+   its close is above its *last* buy price (so every lot is in profit) and at
+   least 5 sessions have passed since that buy. The 1st add risks 50% of the
+   stock's normal risk, the 2nd 25%; no more than 2 adds, and the stock's total
+   value stays under the 20% single-stock cap. Each add is its own lot with its
+   own stop, trail and exits.
+
+Plus one sizing change the backtest called for: **every per-trade risk ×0.75**
+(Large/Mid/Small 0.75% / 0.56% / 0.375%). At the old risk levels a position
+is ~7-15% of capital, so the 85% capital cap fills at 6-8 stocks and the 15
+slots go unused.
+
+**Accounting bug found and fixed first.** The simulator's `cash` is starting
+capital plus realized P&L — buys are never deducted from it — but daily
+equity added each open position's *full market value* on top, counting it
+twice. The equity curve jumped up whenever positions were open and fell back
+as they closed, which inflated drawdowns and distorted CAGR and Sharpe. **Every
+CAGR / max-drawdown / Sharpe / Calmar figure in §8-§16 is affected** (trade
+counts, win rates and R-multiples are not). Fixed: open positions now add only
+their unrealized P&L. The corrected old-rules row below is the like-for-like
+replacement for §16's "+13.9% / -48.9%".
+
+**Results** — 2017-10-16 to 2026-10-07 (9.0 years), 498 stocks, Trend Template
+entry + trailing exit, market filter off unless stated
+(`backtest/run_portfolio_backtest.py`, run on GitHub Actions):
+
+| Variant | Trades | Adds | Win % | Avg stocks held | CAGR | Max DD | Sharpe | Calmar |
+|---|---|---|---|---|---|---|---|---|
+| Old rules (2/sector, max 8, no adds) | 1,103 | 0 | 35.8 | 6.2 | +12.6% | -25.0% | 1.16 | 0.51 |
+| Old rules, market filter ON | 531 | 0 | 35.8 | 2.8 | +8.8% | -18.1% | 1.06 | 0.49 |
+| 15 weighted, no adds | 1,474 | 0 | 35.4 | 8.4 | +12.7% | -21.1% | 1.11 | 0.60 |
+| 15 weighted + adds | 1,873 | 597 | 35.7 | 8.1 | +12.9% | -18.6% | 1.10 | 0.69 |
+| **15 weighted + adds, risk ×0.75 (live)** | 2,266 | 793 | 35.1 | **9.5** | **+12.6%** | **-20.3%** | **1.14** | **0.62** |
+| 15 weighted + adds, risk ×0.6 | 2,535 | 987 | 35.9 | 10.1 | +11.9% | -22.9% | 1.18 | 0.52 |
+| 15 weighted, no adds, risk ×0.75 | 1,675 | 0 | 36.2 | 9.6 | +11.5% | -20.9% | 1.10 | 0.55 |
+| Live rules, market filter ON | 1,087 | 342 | 35.6 | 4.4 | +8.5% | -17.8% | 0.98 | 0.48 |
+| *Nifty500 buy & hold* | | | | | +10.5% | -38.3% | 0.70 | 0.27 |
+
+**Honest reading.**
+
+- **Noise is as large as most of these differences.** An earlier run the same
+  day (data fetched ~20 minutes apart, so a few tickers' histories differed)
+  gave, for identical configurations, max drawdowns up to 8pp apart (e.g. "15
+  weighted + adds": -26.3% then -18.6%) and CAGRs up to 0.5pp apart. So the new
+  rules are **not measurably better or worse than the old ones** on return —
+  every variant without the market filter lands at +11.5% to +12.9%.
+- **What the new rules do buy is diversification**: ~9.5 stocks held on
+  average instead of ~6, for the same CAGR and a similar-or-shallower
+  drawdown. That was the stated goal.
+- **Adds neither help nor hurt.** Adds win 35-36% of the time, the same as
+  first buys. Adding to a winner doesn't select better trades here; it mostly
+  puts more capital into names that are already working.
+- **15 is a ceiling, not the usual count.** Even at ×0.75 risk the 85% capital
+  and 8% heat caps keep the average at ~9.5; 15 is reached only when many
+  small, tight-stop positions qualify at once.
+- **The market filter (§16) stays off**, re-checked with corrected accounting:
+  it costs ~4pp of CAGR for 2-7pp less drawdown, with a lower Calmar.
+- **The strategy beats buy-and-hold on every metric once the accounting is
+  fixed** (+12.6% vs +10.5% CAGR, -20% vs -38% drawdown, Sharpe 1.14 vs 0.70).
+  Treat this with §9's caveat: today's Nifty500 applied retroactively
+  (survivorship bias), and no point-in-time sector membership. §8b's "loses to
+  the index on every metric" conclusion was itself a product of the bug.
