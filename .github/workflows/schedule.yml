@@ -1,17 +1,32 @@
 name: Daily Stock Screener
 
 on:
-  # Weekday evenings, after the NSE close (15:30 IST), on that day's full
-  # end-of-day data. GitHub's scheduler routinely starts jobs hours late and
-  # sometimes skips a slot, so there are two: the backup exits early if the
-  # first already published today's report.
-  #   11:30 UTC = 17:00 IST (primary)   15:30 UTC = 21:00 IST (backup)
+  # Every weekday after the NSE close (15:30 IST). The strategy trades a signal
+  # from session T's close at session T+1's open, so the run must see T's final
+  # bar and finish before 09:15 IST the next morning; 18:17 IST is after NSE has
+  # published that day's delivery bhavcopy and FII/DII figures too.
+  #
+  # GitHub's scheduler starts jobs hours late (5-8h was observed) and sometimes
+  # drops a slot, so there are backups through the night. Whichever runs first
+  # processes the session; the others see it's done and exit in seconds.
+  # Off-the-hour minutes on purpose: :00 and :30 are GitHub's most congested.
+  #   12:47 UTC = 18:17 IST (primary)   16:17 UTC = 21:47 IST
+  #   19:47 UTC = 01:17 IST             00:17 UTC = 05:47 IST (Tue-Sat)
   schedule:
-    - cron: "30 11 * * 1-5"
-    - cron: "30 15 * * 1-5"
+    - cron: "47 12 * * 1-5"
+    - cron: "17 16 * * 1-5"
+    - cron: "47 19 * * 1-5"
+    - cron: "17 0 * * 2-6"
 
-  # Manual trigger from the Actions tab (always runs).
+  # Manual trigger from the Actions tab. Runs even if the session is already
+  # processed, unless "force" is unticked. A run during market hours is safe:
+  # the still-forming intraday bar is dropped (stock_fetcher.drop_unsettled_bar).
   workflow_dispatch:
+    inputs:
+      force:
+        description: "Run even if the latest session was already processed"
+        type: boolean
+        default: true
 
 permissions:
   contents: write   # commit the report, dashboard and paper-trading files back to the repo
@@ -27,17 +42,40 @@ jobs:
     timeout-minutes: 30
 
     steps:
+      # Always the latest main, never the commit the run was created on: "Re-run"
+      # on an old run otherwise checks out that run's commit, i.e. a stale paper
+      # account, which then can't be pushed back on top of newer state.
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
+          ref: main
           fetch-depth: 0
 
-      - name: Skip if today's report already exists
+      # The latest *completed* NSE session (weekends skipped; holidays aren't
+      # known here, so a holiday's first run processes the prior session again
+      # and records the holiday as checked).
+      - name: Skip if the latest session was already processed
         id: guard
-        if: github.event_name == 'schedule'
         run: |
-          if [ -f "docs/reports/$(date -u +%Y-%m-%d).html" ]; then
-            echo "Today's report is already published — backup run skipping."
+          session=$(python3 - <<'PY'
+          from datetime import datetime, timedelta
+          from zoneinfo import ZoneInfo
+          now = datetime.now(ZoneInfo("Asia/Kolkata"))
+          d = now.date()
+          if now.weekday() > 4 or now.hour < 16:
+              d -= timedelta(days=1)
+          while d.weekday() > 4:
+              d -= timedelta(days=1)
+          print(d)
+          PY
+          )
+          echo "session=$session" >> "$GITHUB_OUTPUT"
+          echo "Latest completed session: $session"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.force }}" != "false" ]; then
+            exit 0
+          fi
+          if [ "$(cat docs/data/last_session.txt 2>/dev/null)" = "$session" ]; then
+            echo "Session $session already processed — skipping."
             echo "skip=true" >> "$GITHUB_OUTPUT"
           fi
 
@@ -63,6 +101,10 @@ jobs:
           RISK_PCT_PER_TRADE:   ${{ secrets.RISK_PCT_PER_TRADE || '1.0' }}
           PAGES_BASE_URL:       ${{ secrets.PAGES_BASE_URL }}
         run: python main.py
+
+      - name: Record the session as processed
+        if: steps.guard.outputs.skip != 'true' && success()
+        run: echo "${{ steps.guard.outputs.session }}" > docs/data/last_session.txt
 
       # Runs even if the screener step failed (e.g. email) — the report, dashboard
       # and paper-trading files are the product; email is just delivery.

@@ -29,7 +29,7 @@ import yfinance as yf
 
 from . import trend_template
 from .sector_mapper import MAX_STOCKS_PER_SECTOR, build_universe, group_by_sector
-from .stock_fetcher import fetch_stock_data
+from .stock_fetcher import drop_unsettled_bar, fetch_stock_data
 
 logger = logging.getLogger(__name__)
 
@@ -126,7 +126,7 @@ def _fetch_benchmark(period: str) -> pd.Series:
     close = df["Close"]
     if isinstance(close, pd.DataFrame):
         close = close.iloc[:, 0]
-    return close.dropna()
+    return drop_unsettled_bar(close.dropna())
 
 
 def rank_sectors(period: str = "1y") -> RotationResult:

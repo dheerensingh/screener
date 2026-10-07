@@ -35,8 +35,9 @@ CHART_JS = "https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"
 
 # Reference numbers from STRATEGY.md §16 (8.8-year backtest, live configuration).
 BACKTEST_REFERENCE = {
-    "strategy": {"cagr": 13.9, "max_dd": -48.9, "sharpe": 0.60, "win_rate": 36.1},
-    "nifty500": {"cagr": 11.3, "max_dd": -38.3, "sharpe": 0.74},
+    # STRATEGY.md §17, 2017-10 to 2026-10, live rules, corrected equity accounting.
+    "strategy": {"cagr": 12.6, "max_dd": -20.3, "sharpe": 1.14, "win_rate": 35.1},
+    "nifty500": {"cagr": 10.5, "max_dd": -38.3, "sharpe": 0.70},
 }
 
 
@@ -179,7 +180,8 @@ def build_dashboard_html(
                          f'{_signed_inr(float(r["pnl"]))} · {_e(r["exit_reason"])}'])
     for r in state.booked_today:
         est = int(r["quantity"]) * float(r["signal_price"])
-        activity.append(["Order placed", _e(r["ticker"]), _e(r["sector"]), f'{r["quantity"]} shares (~{inr(est)})',
+        action = "Add to winner" if r.get("note", "").startswith("Add #") else "Order placed"
+        activity.append([action, _e(r["ticker"]), _e(r["sector"]), f'{r["quantity"]} shares (~{inr(est)})',
                          "buys at next session's open"])
     for r in state.cancelled_today:
         activity.append(["Cancelled", _e(r["ticker"]), _e(r["sector"]), "—", _e(r.get("note", ""))])
@@ -430,11 +432,12 @@ footer {{ color: var(--muted); font-size: 12px; margin-top: 24px; }}
   <h2>How this paper account works</h2>
   <ul>
     <li>Starts with {inr(start)}. Each weekday evening the screener ranks sectors, screens the 4 leaders, and places orders for qualifying stocks. Orders fill at the next session's opening price.</li>
-    <li>Sizing: risk 1.0% / 0.75% / 0.5% of capital per trade for large / mid / small caps, at most 2 positions per sector, at most 85% of capital invested and 8% total risk.</li>
+    <li>Sizing: risk 0.75% / 0.56% / 0.375% of capital per trade for large / mid / small caps; at most 85% of capital invested, 8% total risk and 20% in any one stock.</li>
+    <li>Up to 15 stocks. Each of the 4 leading sectors gets 2 slots; the other 7 go to sectors in proportion to their relative-strength score. A stock already held that qualifies again is bought again if it is above its last buy price and 5+ sessions have passed — at half, then a quarter, of the normal risk, at most twice.</li>
     <li>Exits: initial stop at min(2×ATR, 8%) below entry, trailing at 2.5×ATR below the highest close; sell at the next open if RSI closes below 45 or after 26 sessions.</li>
     <li>Costs of {COST_PCT_PER_SIDE:.2f}% on every buy and sell (STT, stamp duty, exchange and DP charges).</li>
     <li>The broad-market (200-day) filter was turned off on 1 Oct 2026; it is still shown above for context.</li>
-    <li>What to expect, from the 8.8-year backtest of this exact setup: about {BACKTEST_REFERENCE['strategy']['cagr']:.1f}% a year with drawdowns up to {BACKTEST_REFERENCE['strategy']['max_dd']:.0f}% and a win rate near {BACKTEST_REFERENCE['strategy']['win_rate']:.0f}%, against {BACKTEST_REFERENCE['nifty500']['cagr']:.1f}% a year and {BACKTEST_REFERENCE['nifty500']['max_dd']:.0f}% for simply holding the Nifty500. Most trades lose a little; a few large winners carry the result. Three months is a short sample — judge it against the index, not in isolation.</li>
+    <li>What to expect, from the 9-year backtest of this exact setup: about {BACKTEST_REFERENCE['strategy']['cagr']:.1f}% a year with drawdowns up to {BACKTEST_REFERENCE['strategy']['max_dd']:.0f}% and a win rate near {BACKTEST_REFERENCE['strategy']['win_rate']:.0f}%, against {BACKTEST_REFERENCE['nifty500']['cagr']:.1f}% a year and {BACKTEST_REFERENCE['nifty500']['max_dd']:.0f}% for simply holding the Nifty500. Most trades lose a little; a few large winners carry the result. Three months is a short sample — judge it against the index, not in isolation.</li>
   </ul>
 </div>
 

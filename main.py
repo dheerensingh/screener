@@ -15,9 +15,10 @@ Pipeline:
       promoter share pledge (governance_analyzer.py).
   3b. Paper account (paper_trader.py): fill yesterday's orders at today's open,
       apply exit rules to open positions, mark everything to market.
-  3c. Allocate new orders around what's already held — per-sector cap, budget-
-      aware sizing, portfolio-heat ceiling, cap-band risk (portfolio_allocator.py)
-      — and book them as pending orders for the next open.
+  3c. Allocate new orders around what's already held — up to 15 stocks with
+      sector shares weighted by relative strength, smaller adds to held winners,
+      budget-aware sizing, portfolio-heat ceiling, cap-band risk
+      (portfolio_allocator.py) — and book them as pending orders for the next open.
   4. Publish the screening report and the paper-trading dashboard to docs/
      (report_generator.py, dashboard.py) for GitHub Pages.
   5. Send a summary email linking to both (email_alerter.py).
@@ -27,7 +28,8 @@ Run locally:
   cp .env.example .env && fill in your credentials
   python main.py
 
-Run via GitHub Actions: weekday evenings after the NSE close — see
+Run via GitHub Actions: every weekday after the NSE close (18:17 IST, with overnight
+backups) — see
 .github/workflows/schedule.yml. See CLAUDE.md for the architecture.
 """
 
@@ -49,7 +51,7 @@ from modules.delivery_analyzer import fetch_latest_delivery_pct
 from modules.technical_analyzer import screen_stocks
 from modules.market_regime import evaluate as evaluate_market_regime
 from modules.fii_dii_flow import fetch_latest_flow
-from modules.portfolio_allocator import allocate as allocate_portfolio
+from modules.portfolio_allocator import MAX_TOTAL_POSITIONS, allocate as allocate_portfolio
 from modules.position_sizer import get_account_size
 from modules.report_generator import SectorBundle, build_report_html, publish_report
 from modules.paper_trader import PaperTrader
@@ -188,10 +190,11 @@ def main() -> int:
         allocation = allocate_portfolio(
             sector_qualifiers, account_size=account_size,
             existing_deployed_pct=deployed_pct, existing_heat_pct=heat_pct,
-            held_tickers=trader.held_tickers(), held_per_sector=trader.held_per_sector(),
+            sector_scores={s.sector: s.score for s in leading}, holdings=trader.holdings(),
         )
+        logger.info("  Sector slots (of %d stocks): %s", MAX_TOTAL_POSITIONS, allocation.slots)
         sector_of = {r.ticker: sector for sector, rs in sector_qualifiers.items() for r in rs}
-        trader.book(allocation.accepted, sector_of)
+        trader.book(allocation.accepted, sector_of, adds=allocation.adds)
         logger.info(
             "  Booked %d order(s), rejected %d — %.1f%% capital, %.1f%% heat committed",
             len(trader.booked_today), len(allocation.rejected),
@@ -203,7 +206,11 @@ def main() -> int:
             bundle.position_sizes = {r.ticker: accepted_by_ticker[r.ticker]
                                      for r in bundle.qualified if r.ticker in accepted_by_ticker}
 
-        decisions = {r.ticker: f"Order placed: {pos.quantity} shares for next open" for r, pos in allocation.accepted}
+        decisions = {
+            r.ticker: (f"Add #{allocation.adds[r.ticker]} (winner): {pos.quantity} shares for next open"
+                       if r.ticker in allocation.adds else f"Order placed: {pos.quantity} shares for next open")
+            for r, pos in allocation.accepted
+        }
         decisions.update({r.ticker: reason for r, reason in allocation.rejected})
         for sector, results in sector_qualifiers.items():
             for r in results:
@@ -228,8 +235,13 @@ def main() -> int:
     report_url = dashboard_url = None
     try:
         logger.info("Step 4: Building + publishing HTML report and dashboard ...")
-        html = build_report_html(all_scores, bundles, account_size, errors, regime=regime, flow=flow)
-        dated_path, _ = publish_report(html)
+        # Named by the market session the data is from, not the calendar date of the
+        # run — a late-evening and an early-morning run of the same session then land
+        # on the same file, which is what the workflow's skip-guard checks for.
+        session = datetime.strptime(trader.as_of, "%Y-%m-%d") if trader.as_of else None
+        html = build_report_html(all_scores, bundles, account_size, errors, generated_at=session,
+                                 regime=regime, flow=flow)
+        dated_path, _ = publish_report(html, date=session)
         publish_dashboard(build_dashboard_html(
             paper, all_scores, {s.sector for s in leading}, candidates, regime, flow,
         ))

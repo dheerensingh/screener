@@ -77,12 +77,19 @@ it into the full pipeline above, `instruction.md` for how to work on this repo, 
 by both sector rotation and per-stock screening — pulls OHLCV from `yfinance` in chunks
 of 100 tickers, handling its MultiIndex column layout, requiring ≥60 rows of history.
 
-Deployment: `.github/workflows/schedule.yml` runs on weekday evenings after the NSE
-close — 17:00 IST, plus a 21:00 IST backup that skips itself if the report already
-exists (GitHub's scheduler started the old 08:00 run 4-6 hours late every day) — and
-on manual `workflow_dispatch`. It runs `python main.py`, then commits `docs/**`,
+Deployment: `.github/workflows/schedule.yml` runs every weekday after the NSE close —
+18:17 IST primary, with backups at 21:47, 01:17 and 05:47 IST, because GitHub's
+scheduler started jobs 5-8 hours late (2026-10). Whichever slot runs first processes
+the latest completed session and writes it to `docs/data/last_session.txt`; the rest
+see it and exit in seconds. Manual `workflow_dispatch` always runs (untick `force` to
+get the same skip). The checkout is always the latest `main`, never the run's original
+commit — "Re-run" on an old run used to check out a stale paper account and then fail
+to push (2026-10-06). It runs `python main.py`, then commits `docs/**`,
 `paper_trades.csv` and `paper_equity.csv` back to `main` even if email failed, so
-GitHub Pages picks up the new report and the paper account persists.
+GitHub Pages picks up the new report and the paper account persists. Reports are named
+by market session date (`trader.as_of`), not the run's calendar date. Runs during
+market hours are safe: `stock_fetcher.drop_unsettled_bar` drops today's live bar
+before 16:00 IST, so signals and the paper account only ever see completed sessions.
 
 **Retired:** `modules/twitter_extractor.py` (sentiment-based sector detection) and
 `modules/stock_universe.py` (broad-market ~500-ticker fallback) were deleted — the new
@@ -341,7 +348,8 @@ real index" framing — don't let a future session read this CAGR at face value.
 - **Market filter off.** `main.py` no longer gates allocation on
   `market_regime.evaluate()`; it is logged and shown on the dashboard. Measured
   first: for the Trend Template configuration, CAGR +7.3% → +13.9% with max DD
-  -48.0% → -48.9% over 8.8 years. `BacktestConfig.apply_market_regime_filter`
+  -48.0% → -48.9% over 8.8 years (numbers from the buggy equity curve — see Task 9;
+  re-measured on 2026-10-07 the filter still costs ~4pp CAGR, so off still stands). `BacktestConfig.apply_market_regime_filter`
   defaults to `False` to keep backtest and live identical.
 - **`modules/paper_trader.py`** (`PaperTrader`) — the paper account. Per run:
   fill pending orders at the next session's open (cancel if the open is at or
@@ -353,12 +361,43 @@ real index" framing — don't let a future session read this CAGR at face value.
   from the ledger, never stored. Costs: 0.15% per side. The market date is the most
   common last bar across held/screened stocks; each order's `signal_date` is that
   stock's own last bar, so a fill can never use a price the signal already saw.
-- **`portfolio_allocator.allocate()`** gained `held_tickers` / `held_per_sector`:
-  already-held stocks are skipped and use up their sector's 2 slots. Rejections are
-  recorded with reasons (shown on the dashboard).
+- **`portfolio_allocator.allocate()`** takes the paper account's holdings so it sizes
+  around what's already owned. Rejections are recorded with reasons (shown on the
+  dashboard). Replaced by Task 9's rules below.
 - **`modules/dashboard.py`** — builds `docs/index.html` (Chart.js from jsdelivr,
   data embedded as JSON, light/dark from the data-viz reference palette, every chart
   with a table twin) and copies both CSVs to `docs/data/`.
 - **Email** (`email_alerter.build_summary_email`) now takes the `PaperState`:
   portfolio value and return vs Nifty500, today's buys/sells, orders for the next
   open, links to the dashboard and report.
+
+## Task 9 (2026-10-07): 15-stock book, RS-weighted sector slots, adds to winners
+
+**STRATEGY.md §17 is the canonical reference.** Module map only:
+
+- **`portfolio_allocator.py`** — `MAX_TOTAL_POSITIONS = 15` stocks.
+  `sector_slots()` gives each leading sector 2 slots and splits the other 7 by
+  its relative-strength score. `add_blocker()` / `add_risk_fraction()`: a held
+  stock that qualifies again is bought again when above its last buy price and
+  5+ sessions after it, at 50% then 25% of its normal risk, within the 20%
+  single-stock cap. `RISK_SCALE = 0.75` multiplies every cap-band risk so more
+  of the 15 slots fit under the 85% capital cap. `allocate()` takes
+  `sector_scores` and `holdings` (a `Holding` per stock, lots combined).
+- **`paper_trader.py`** — `holdings()` builds those `Holding`s; an add is its own
+  ledger row ("lot") with its own stop and exits, `note` = "Add #n to a winning
+  position".
+- **`backtest/simulator.py`** uses the same helpers and constants; positions are
+  keyed by lot. `BacktestConfig` gained `max_total_positions`,
+  `weighted_sector_slots`, `allow_pyramiding`, `risk_scale`,
+  `max_portfolio_heat_pct`, `max_deployed_capital_pct` (defaults = live).
+- **Backtest equity bug fixed.** `cash` in the simulator is starting capital plus
+  realized P&L (buys are never deducted), but the daily equity added each open
+  position's full market value, double-counting it. Every backtest CAGR/drawdown/
+  Sharpe recorded before 2026-10-07 (STRATEGY.md §8-§16, the Task 8 numbers above)
+  is affected; §17 has corrected numbers. Trade-level stats (win rate, avg R) were
+  not affected.
+- **`backtest/run_portfolio_backtest.py`** + **`.github/workflows/backtest.yml`** —
+  old-vs-new rules comparison on 10y data. Runs on GitHub Actions (on push to a
+  non-main branch touching `backtest/**` or the allocator, or manually) because
+  this repo's cloud sessions can't reach Yahoo/NSE; the table is in the run's
+  summary page.

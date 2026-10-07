@@ -14,7 +14,9 @@ Key design decisions:
 import math
 import logging
 import time
-from typing import Optional
+from datetime import datetime, time as dtime
+from typing import Optional, Union
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 import yfinance as yf
@@ -24,6 +26,30 @@ logger = logging.getLogger(__name__)
 NSE_SUFFIX = ".NS"
 MIN_REQUIRED_ROWS = 60   # ~3 months; 6 months requested but some stocks may be newer
 CHUNK_SLEEP_SEC = 2       # polite pause between chunks to avoid yfinance rate limits
+
+IST = ZoneInfo("Asia/Kolkata")
+# NSE closes at 15:30 IST; yfinance's daily bar is final a little after that.
+# Before this, today's bar (if any) is a live, still-forming candle.
+SESSION_SETTLED_AT = dtime(16, 0)
+
+
+def drop_unsettled_bar(
+    data: Union[pd.DataFrame, pd.Series], now: Optional[datetime] = None,
+) -> Union[pd.DataFrame, pd.Series]:
+    """
+    Drops today's bar if the session hasn't closed yet (run before 16:00 IST).
+    During market hours yfinance returns the live candle as today's daily bar;
+    treating it as a close would compute signals, exits and the paper account's
+    marks off a half-finished session. Every run — manual or a late scheduled
+    one — therefore only ever sees completed sessions.
+    """
+    now = (now or datetime.now(IST)).astimezone(IST)
+    if data.empty or now.time() >= SESSION_SETTLED_AT:
+        return data
+    idx = data.index
+    if getattr(idx, "tz", None) is not None:
+        idx = idx.tz_convert(IST).tz_localize(None)
+    return data[idx.normalize() < pd.Timestamp(now.date())]
 
 
 def _to_ns_ticker(ticker: str) -> str:
@@ -142,6 +168,9 @@ def _clean(df: pd.DataFrame, ticker: str) -> Optional[pd.DataFrame]:
         return None
 
     df.sort_index(inplace=True)
+    df = drop_unsettled_bar(df)
+    if len(df) < MIN_REQUIRED_ROWS:
+        return None
     return df
 
 

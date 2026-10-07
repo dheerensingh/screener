@@ -1,0 +1,25 @@
+name: Portfolio Backtest
+
+# Runs the portfolio-rules comparison (backtest/run_portfolio_backtest.py) on
+# 10 years of data. Results are in the run's summary page.
+on:
+  workflow_dispatch:
+  push:
+    branches-ignore: [main]
+    paths:
+      - "backtest/**"
+      - "modules/portfolio_allocator.py"
+      - ".github/workflows/backtest.yml"
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+      - run: pip install --upgrade pip && pip install -r requirements.txt
+      - run: python -m backtest.run_portfolio_backtest --period 10y
