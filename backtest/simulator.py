@@ -36,6 +36,11 @@ from typing import Literal, Optional
 import numpy as np
 import pandas as pd
 
+from modules.portfolio_allocator import (
+    CAP_BAND_RISK_PCT, MAX_DEPLOYED_CAPITAL_PCT, MAX_PORTFOLIO_HEAT_PCT, MAX_TOTAL_POSITIONS,
+    Holding, add_blocker, add_risk_fraction, sector_slots,
+)
+from modules.position_sizer import DEFAULT_MAX_POSITION_PCT
 from modules.technical_analyzer import _macd, _rsi, atr as compute_atr
 from modules.trend_template import PCT_ABOVE_52W_LOW_MIN, PCT_BELOW_52W_HIGH_MAX, RS_RATING_THRESHOLD
 from modules.vcp_pattern import (
@@ -49,9 +54,7 @@ RSI_THRESHOLD = 55.0
 TOP_N_SECTORS = 4
 MAX_STOCKS_PER_SECTOR = 40
 MIN_AVG_DAILY_VALUE_INR = 2_00_00_000
-MAX_POSITIONS_PER_SECTOR = 2
-MAX_DEPLOYED_CAPITAL_PCT = 85.0
-MAX_PORTFOLIO_HEAT_PCT = 8.0
+LEGACY_POSITIONS_PER_SECTOR = 2  # the fixed cap used before 2026-10-07 — BacktestConfig.weighted_sector_slots=False
 CAP_BAND_RISK_PCT_DEFAULT = 0.75
 ATR_STOP_MULTIPLIER = 2.0
 MAX_STOP_PCT = 8.0
@@ -86,6 +89,14 @@ class BacktestConfig:
                                         # condition can never trigger — a self-locking trap, found empirically)
     require_delivery_above_median: bool = False  # additional entry filter — see STRATEGY.md §13; tested, not assumed
     delivery_median_lookback_days: int = 20
+    # Portfolio shape (STRATEGY.md §17). Defaults match live; the pre-2026-10-07
+    # rules are weighted_sector_slots=False, max_total_positions=8, allow_pyramiding=False.
+    max_total_positions: int = MAX_TOTAL_POSITIONS
+    weighted_sector_slots: bool = True   # False: a fixed LEGACY_POSITIONS_PER_SECTOR per leading sector
+    allow_pyramiding: bool = True        # buy a held winner again at reduced risk
+    risk_scale: float = 1.0              # multiplies every cap-band risk %
+    max_portfolio_heat_pct: float = MAX_PORTFOLIO_HEAT_PCT
+    max_deployed_capital_pct: float = MAX_DEPLOYED_CAPITAL_PCT
 
 
 @dataclass
@@ -102,6 +113,7 @@ class Trade:
     exit_reason: str = ""
     pnl_rupees: float = 0.0
     r_multiple: float = 0.0  # pnl / initial risk
+    is_add: bool = False     # bought as an add to a stock already held
 
 
 @dataclass
@@ -117,6 +129,7 @@ class OpenPosition:
     highest_close: float
     risk_amount: float
     scaled_out: bool = False
+    is_add: bool = False
 
 
 def _per_ticker_signals(ticker: str, df: pd.DataFrame) -> Optional[pd.DataFrame]:
@@ -286,7 +299,9 @@ def run_backtest(
     closed_trades: list[Trade] = []
     equity_curve: list[tuple[pd.Timestamp, float]] = []
     cash = config.account_size
-    pending_entries: list[tuple[str, str]] = []  # (ticker, sector) decided on day T, entered T+1
+    # (ticker, sector, add risk fraction or None for a new name) decided on day T, entered T+1
+    pending_entries: list[tuple[str, str, Optional[float]]] = []
+    lot_seq = 0  # open_positions is keyed by lot ("TICKER#n"): an add to a winner is its own lot
     equity_peak = config.account_size
     entries_halted = False  # strategy-level drawdown circuit breaker state
     halted_since_idx: Optional[int] = None  # trading_days index when the halt started, for the cooldown timer
@@ -298,13 +313,13 @@ def run_backtest(
                 p.quantity * signals[p.ticker]["close"].get(day, p.entry_price) for p in open_positions.values()
             ) / config.account_size * 100.0
             heat_pct = sum(p.risk_amount for p in open_positions.values()) / config.account_size * 100.0
+            held_now = {p.ticker for p in open_positions.values()}
 
-            per_sector_open_count: dict[str, int] = {}
-            for p in open_positions.values():
-                per_sector_open_count[p.sector] = per_sector_open_count.get(p.sector, 0) + 1
-
-            for ticker, sector in pending_entries:
-                if ticker in open_positions:
+            for ticker, sector, add_fraction in pending_entries:
+                is_add = add_fraction is not None
+                if is_add != (ticker in held_now):
+                    continue  # a new name got bought already, or the winner was sold before the add filled
+                if not is_add and len(held_now) >= config.max_total_positions:
                     continue
                 sig = signals[ticker]
                 if day not in sig.index:
@@ -318,12 +333,17 @@ def run_backtest(
                     continue
 
                 cap_band = cap_band_by_ticker.get(ticker, "Mid")
-                risk_pct = {"Large": 1.0, "Mid": 0.75, "Small": 0.5}.get(cap_band, CAP_BAND_RISK_PCT_DEFAULT)
+                risk_pct = CAP_BAND_RISK_PCT.get(cap_band, CAP_BAND_RISK_PCT_DEFAULT) * config.risk_scale
+                max_position_pct = DEFAULT_MAX_POSITION_PCT
+                if is_add:
+                    risk_pct *= add_fraction
+                    held_value = sum(p.quantity * entry_price for p in open_positions.values() if p.ticker == ticker)
+                    max_position_pct -= held_value / config.account_size * 100.0
+                    if max_position_pct <= 0:
+                        continue
 
-                if per_sector_open_count.get(sector, 0) >= MAX_POSITIONS_PER_SECTOR:
-                    continue
-                remaining_capital_pct = MAX_DEPLOYED_CAPITAL_PCT - deployed_pct
-                remaining_heat_pct = MAX_PORTFOLIO_HEAT_PCT - heat_pct
+                remaining_capital_pct = config.max_deployed_capital_pct - deployed_pct
+                remaining_heat_pct = config.max_portfolio_heat_pct - heat_pct
                 if remaining_capital_pct <= 0 or remaining_heat_pct <= 0 or risk_pct > remaining_heat_pct:
                     continue
 
@@ -341,26 +361,29 @@ def run_backtest(
 
                 risk_amount = config.account_size * risk_pct / 100.0
                 qty = int(risk_amount / stop_dist)
-                max_alloc = config.account_size * min(20.0, remaining_capital_pct) / 100.0
+                max_alloc = config.account_size * min(max_position_pct, remaining_capital_pct) / 100.0
                 if qty * entry_price > max_alloc:
                     qty = int(max_alloc / entry_price)
                 if qty <= 0:
                     continue
 
-                open_positions[ticker] = OpenPosition(
+                lot_seq += 1
+                open_positions[f"{ticker}#{lot_seq}"] = OpenPosition(
                     ticker=ticker, sector=sector, cap_band=cap_band, entry_date=day,
                     entry_price=entry_price, quantity=qty, initial_risk_per_share=stop_dist,
                     stop=entry_price - stop_dist, highest_close=entry_price, risk_amount=risk_amount,
+                    is_add=is_add,
                 )
-                per_sector_open_count[sector] = per_sector_open_count.get(sector, 0) + 1
+                held_now.add(ticker)
                 deployed_pct += (qty * entry_price) / config.account_size * 100.0
                 heat_pct += risk_pct
 
         pending_entries = []
 
         # ── 2. Exit checks for open positions (resting stop/target vs today's H/L) ──
-        for ticker in list(open_positions.keys()):
-            pos = open_positions[ticker]
+        for lot_id in list(open_positions.keys()):
+            pos = open_positions[lot_id]
+            ticker = pos.ticker
             sig = signals[ticker]
             if day not in sig.index:
                 continue
@@ -397,9 +420,10 @@ def run_backtest(
                     initial_stop=pos.entry_price - pos.initial_risk_per_share,
                     exit_date=day, exit_price=exit_price, exit_reason=exit_reason,
                     pnl_rupees=pnl, r_multiple=pnl / pos.risk_amount if pos.risk_amount else 0.0,
+                    is_add=pos.is_add,
                 ))
                 cash += pnl
-                del open_positions[ticker]
+                del open_positions[lot_id]
                 continue
 
             # Still open: update trailing stop / highest close for tomorrow
@@ -444,11 +468,12 @@ def run_backtest(
 
             leading = sorted(today_sector_scores, key=today_sector_scores.get, reverse=True)[:TOP_N_SECTORS]
 
+            holdings = _holdings(open_positions, signals, trading_days, day)
             candidates_by_sector: dict[str, list[tuple[str, float]]] = {}
             for sector in leading:
                 cands = []
                 for ticker in sector_members.get(sector, []):
-                    if ticker in open_positions:
+                    if ticker in holdings and not config.allow_pyramiding:
                         continue
                     sig = signals[ticker]
                     if day not in sig.index:
@@ -484,14 +509,48 @@ def run_backtest(
                         strength = row["rsi"] / 100.0
                     cands.append((ticker, strength))
                 cands.sort(key=lambda x: x[1], reverse=True)
-                candidates_by_sector[sector] = [t for t, _ in cands[:MAX_POSITIONS_PER_SECTOR]]
+                candidates_by_sector[sector] = cands
 
-            for sector, tickers in candidates_by_sector.items():
-                for t in tickers:
-                    pending_entries.append((t, sector))
+            # Same rules as portfolio_allocator.allocate(): weighted sector slots,
+            # adds only to winners, at most max_total_positions names, sectors interleaved.
+            if config.weighted_sector_slots:
+                slots = sector_slots({s: today_sector_scores[s] for s in leading}, total=config.max_total_positions)
+            else:
+                slots = {s: LEGACY_POSITIONS_PER_SECTOR for s in leading}
+            held_in_sector: dict[str, int] = {}
+            for h in holdings.values():
+                held_in_sector[h.sector] = held_in_sector.get(h.sector, 0) + 1
+            per_sector_picks: list[list[tuple[str, str, Optional[float]]]] = []
+            for sector in leading:
+                free = max(0, slots.get(sector, 0) - held_in_sector.get(sector, 0))
+                picks = []
+                for t, _ in candidates_by_sector.get(sector, []):
+                    h = holdings.get(t)
+                    if h is not None:
+                        if add_blocker(h, float(signals[t].loc[day, "close"])) is None:
+                            picks.append((t, sector, add_risk_fraction(h)))
+                    elif free > 0:
+                        picks.append((t, sector, None))
+                        free -= 1
+                per_sector_picks.append(picks)
+            rounds = max((len(p) for p in per_sector_picks), default=0)
+            new_names = len(holdings)
+            for i in range(rounds):
+                for picks in per_sector_picks:
+                    if i >= len(picks):
+                        continue
+                    if picks[i][2] is None:
+                        if new_names >= config.max_total_positions:
+                            continue
+                        new_names += 1
+                    pending_entries.append(picks[i])
 
+        # `cash` here is starting capital + realized P&L (buys are never deducted from
+        # it), so open positions add only their unrealized P&L. Until 2026-10-07 this
+        # added their full market value, double-counting every open position.
         equity = cash + sum(
-            p.quantity * float(signals[p.ticker]["close"].get(day, p.entry_price)) for p in open_positions.values()
+            p.quantity * (float(signals[p.ticker]["close"].get(day, p.entry_price)) - p.entry_price)
+            for p in open_positions.values()
         )
         equity_curve.append((day, equity))
 
@@ -522,6 +581,27 @@ def run_backtest(
         config.account_size,
     )
     return closed_trades, equity_series
+
+
+def _holdings(
+    open_positions: dict[str, OpenPosition], signals: dict[str, pd.DataFrame],
+    trading_days: pd.DatetimeIndex, day: pd.Timestamp,
+) -> dict[str, Holding]:
+    """open_positions grouped per stock, as portfolio_allocator.Holding (what the live paper account builds)."""
+    out: dict[str, Holding] = {}
+    today_idx = trading_days.get_loc(day)
+    for p in open_positions.values():
+        since = today_idx - trading_days.get_loc(p.entry_date) if p.entry_date in trading_days else 0
+        close = float(signals[p.ticker]["close"].get(day, p.entry_price))
+        h = out.get(p.ticker)
+        if h is None:
+            out[p.ticker] = Holding(p.ticker, p.sector, 1, False, p.entry_price, since, p.quantity * close)
+            continue
+        h.lots += 1
+        h.market_value += p.quantity * close
+        if since < h.sessions_since_last_entry:
+            h.last_entry_price, h.sessions_since_last_entry = p.entry_price, since
+    return out
 
 
 _rank_cache: dict[pd.Timestamp, dict[str, float]] = {}

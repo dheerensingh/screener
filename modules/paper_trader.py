@@ -14,6 +14,9 @@ module is the actual paper account. Each daily run (from main.py):
      chandelier trailing stop (intraday), gap below stop (at the open), RSI(14)
      closing below 45 (exit at the next open), 26-session time backstop.
   3. Book — today's accepted signals become pending orders for the next open.
+     A buy that adds to a stock already held is its own ledger row (a "lot")
+     with its own entry, stop and exits; holdings() combines a stock's lots
+     for the allocator.
   4. Snapshot — one row per market date in paper_equity.csv for the dashboard.
 
 All state lives in two committed CSVs: paper_trades.csv (one row per order, its
@@ -35,6 +38,7 @@ from typing import Optional
 
 import pandas as pd
 
+from .portfolio_allocator import Holding
 from .stock_fetcher import fetch_stock_data
 from .technical_analyzer import _rsi, atr as compute_atr
 
@@ -271,7 +275,7 @@ class PaperTrader:
                 affordable = math.floor(cash / (open_px * (1 + COST_PCT_PER_SIDE / 100.0)))
                 if affordable < qty:
                     qty = affordable
-                    row["note"] = "Quantity reduced to available cash"
+                    row["note"] = "; ".join(filter(None, [row.get("note"), "Quantity reduced to available cash"]))
                 if qty <= 0:
                     row.update(status=CANCELLED, note="Not enough cash")
                 else:
@@ -317,15 +321,28 @@ class PaperTrader:
                 to_stop_pct=(last - current_stop) / last * 100.0 if last else 0.0,
             ))
 
-    def held_tickers(self) -> frozenset[str]:
-        return frozenset(r["ticker"] for r in self.ledger if r["status"] in (PENDING, OPEN))
-
-    def held_per_sector(self) -> dict[str, int]:
-        counts: dict[str, int] = {}
+    def holdings(self) -> dict[str, Holding]:
+        """Everything open or pending, one Holding per stock (its lots combined) — for the allocator."""
+        out: dict[str, Holding] = {}
+        mv = {}
+        for p in self.positions:
+            mv[p.ticker] = mv.get(p.ticker, 0.0) + p.market_value
         for r in self.ledger:
-            if r["status"] in (PENDING, OPEN):
-                counts[r["sector"]] = counts.get(r["sector"], 0) + 1
-        return counts
+            if r["status"] not in (PENDING, OPEN):
+                continue
+            h = out.setdefault(r["ticker"], Holding(
+                ticker=r["ticker"], sector=r["sector"], lots=0, pending=False,
+                last_entry_price=0.0, sessions_since_last_entry=0, market_value=mv.get(r["ticker"], 0.0),
+            ))
+            if r["status"] == PENDING:
+                h.pending = True
+                continue
+            h.lots += 1
+            df = self.data.get(r["ticker"])
+            since = len(_bars_after(df, r["entry_date"])) if df is not None else 0
+            if h.lots == 1 or since < h.sessions_since_last_entry:
+                h.last_entry_price, h.sessions_since_last_entry = float(r["entry_price"]), since
+        return out
 
     def exposure_pct(self, account_size: float) -> tuple[float, float]:
         """(deployed %, heat %) of open + pending positions — fed to the allocator."""
@@ -337,11 +354,15 @@ class PaperTrader:
         heat = sum(float(r["risk_amount"]) for r in open_rows + pending)
         return deployed / account_size * 100.0, heat / account_size * 100.0
 
-    def book(self, accepted: list, sector_of: dict[str, str]) -> None:
-        """accepted: [(ScreenResult, PositionSize)] from portfolio_allocator.allocate()."""
-        held = self.held_tickers()
+    def book(self, accepted: list, sector_of: dict[str, str], adds: Optional[dict[str, int]] = None) -> None:
+        """
+        accepted: [(ScreenResult, PositionSize)] from portfolio_allocator.allocate().
+        adds: ticker -> add number, for buys that add to a stock already held.
+        """
+        adds = adds or {}
+        pending = {r["ticker"] for r in self.ledger if r["status"] == PENDING}
         for r, pos in accepted:
-            if r.ticker in held:
+            if r.ticker in pending:
                 continue
             df = self.data.get(r.ticker)
             # The signal's own bar date, so the fill can only ever be the bar AFTER
@@ -354,6 +375,7 @@ class PaperTrader:
                 signal_price=f"{r.current_price:.2f}", stop_distance=f"{pos.stop_distance:.2f}",
                 quantity=str(pos.quantity), risk_amount=f"{pos.risk_amount:.2f}",
                 strength_score=f"{r.strength_score:.2f}", rsi_at_signal=f"{r.rsi:.1f}",
+                note=f"Add #{adds[r.ticker]} to a winning position" if r.ticker in adds else "",
             )
             self.ledger.append(row)
             self.booked_today.append(row)
