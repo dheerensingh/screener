@@ -147,16 +147,23 @@ once it's in a position.
 risk_pct`; `quantity = floor(risk_amount / stop_distance)`; capped so no
 single position exceeds 20% of the account. `risk_pct` is **scaled by cap
 band** — Large 1.0%, Mid 0.75%, Small 0.5% — since ATR alone doesn't fully
-price in a smallcap's extra gap/liquidity risk.
+price in a smallcap's extra gap/liquidity risk. Since 2026-10-07 these are
+multiplied by 0.75 (0.75% / 0.56% / 0.375%) so more of the 15 slots fit
+under the 85% capital cap (§17).
 
 **Portfolio-level rules** (not just per-position sizing in isolation):
 
-- **Max 2 positions per sector.** With 4 leading sectors, the effective total
-  position count (≤8) *falls out of* this diversification choice rather than
-  being a second, independently-picked number. Without this, the top-scoring
-  qualifiers naturally concentrate in whichever single sector is strongest
-  that day — "8 positions" could easily mean 6-7 correlated names from one
-  sector, which is concentration dressed up as diversification.
+- **Up to 15 stocks, sector shares weighted by relative strength** (since
+  2026-10-07, §17; before that, a flat max of 2 per sector, ≤8 in total).
+  Each of the 4 leading sectors gets 2 slots; the other 7 are split by each
+  sector's relative-strength score, so the strongest sector can hold more.
+  Without per-sector limits the top-scoring qualifiers concentrate in
+  whichever single sector is strongest that day — concentration dressed up as
+  diversification.
+- **Adding to winners** (§17). A held stock that qualifies again is bought
+  again only while winning (above its last buy price), 5+ sessions after the
+  last buy, at 50% then 25% of its normal risk, at most twice, within the 20%
+  single-stock cap.
 - **Sequential, budget-aware capital allocation.** Candidates are walked in
   `strength_score` order (interleaved across sectors) and sized against
   *remaining* deployable capital, capped at **85% total** — not fresh total

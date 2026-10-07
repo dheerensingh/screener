@@ -179,7 +179,8 @@ def build_dashboard_html(
                          f'{_signed_inr(float(r["pnl"]))} · {_e(r["exit_reason"])}'])
     for r in state.booked_today:
         est = int(r["quantity"]) * float(r["signal_price"])
-        activity.append(["Order placed", _e(r["ticker"]), _e(r["sector"]), f'{r["quantity"]} shares (~{inr(est)})',
+        action = "Add to winner" if r.get("note", "").startswith("Add #") else "Order placed"
+        activity.append([action, _e(r["ticker"]), _e(r["sector"]), f'{r["quantity"]} shares (~{inr(est)})',
                          "buys at next session's open"])
     for r in state.cancelled_today:
         activity.append(["Cancelled", _e(r["ticker"]), _e(r["sector"]), "—", _e(r.get("note", ""))])
@@ -430,7 +431,8 @@ footer {{ color: var(--muted); font-size: 12px; margin-top: 24px; }}
   <h2>How this paper account works</h2>
   <ul>
     <li>Starts with {inr(start)}. Each weekday evening the screener ranks sectors, screens the 4 leaders, and places orders for qualifying stocks. Orders fill at the next session's opening price.</li>
-    <li>Sizing: risk 1.0% / 0.75% / 0.5% of capital per trade for large / mid / small caps, at most 2 positions per sector, at most 85% of capital invested and 8% total risk.</li>
+    <li>Sizing: risk 0.75% / 0.56% / 0.375% of capital per trade for large / mid / small caps; at most 85% of capital invested, 8% total risk and 20% in any one stock.</li>
+    <li>Up to 15 stocks. Each of the 4 leading sectors gets 2 slots; the other 7 go to sectors in proportion to their relative-strength score. A stock already held that qualifies again is bought again if it is above its last buy price and 5+ sessions have passed — at half, then a quarter, of the normal risk, at most twice.</li>
     <li>Exits: initial stop at min(2×ATR, 8%) below entry, trailing at 2.5×ATR below the highest close; sell at the next open if RSI closes below 45 or after 26 sessions.</li>
     <li>Costs of {COST_PCT_PER_SIDE:.2f}% on every buy and sell (STT, stamp duty, exchange and DP charges).</li>
     <li>The broad-market (200-day) filter was turned off on 1 Oct 2026; it is still shown above for context.</li>

@@ -102,7 +102,8 @@ def build_summary_email(
 
     orders = _email_table(
         ["Ticker", "Sector", "Qty", "Signal close", "Stop"],
-        [[escape(r["ticker"]), escape(r["sector"]), r["quantity"], f'₹{float(r["signal_price"]):,.2f}',
+        [[escape(r["ticker"]) + (" (add to winner)" if r.get("note", "").startswith("Add #") else ""),
+          escape(r["sector"]), r["quantity"], f'₹{float(r["signal_price"]):,.2f}',
           f'₹{float(r["signal_price"]) - float(r["stop_distance"]):,.2f}'] for r in paper.booked_today],
         "No new orders today.",
     )

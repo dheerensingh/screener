@@ -360,12 +360,43 @@ real index" framing — don't let a future session read this CAGR at face value.
   from the ledger, never stored. Costs: 0.15% per side. The market date is the most
   common last bar across held/screened stocks; each order's `signal_date` is that
   stock's own last bar, so a fill can never use a price the signal already saw.
-- **`portfolio_allocator.allocate()`** gained `held_tickers` / `held_per_sector`:
-  already-held stocks are skipped and use up their sector's 2 slots. Rejections are
-  recorded with reasons (shown on the dashboard).
+- **`portfolio_allocator.allocate()`** takes the paper account's holdings so it sizes
+  around what's already owned. Rejections are recorded with reasons (shown on the
+  dashboard). Replaced by Task 9's rules below.
 - **`modules/dashboard.py`** — builds `docs/index.html` (Chart.js from jsdelivr,
   data embedded as JSON, light/dark from the data-viz reference palette, every chart
   with a table twin) and copies both CSVs to `docs/data/`.
 - **Email** (`email_alerter.build_summary_email`) now takes the `PaperState`:
   portfolio value and return vs Nifty500, today's buys/sells, orders for the next
   open, links to the dashboard and report.
+
+## Task 9 (2026-10-07): 15-stock book, RS-weighted sector slots, adds to winners
+
+**STRATEGY.md §17 is the canonical reference.** Module map only:
+
+- **`portfolio_allocator.py`** — `MAX_TOTAL_POSITIONS = 15` stocks.
+  `sector_slots()` gives each leading sector 2 slots and splits the other 7 by
+  its relative-strength score. `add_blocker()` / `add_risk_fraction()`: a held
+  stock that qualifies again is bought again when above its last buy price and
+  5+ sessions after it, at 50% then 25% of its normal risk, within the 20%
+  single-stock cap. `RISK_SCALE = 0.75` multiplies every cap-band risk so more
+  of the 15 slots fit under the 85% capital cap. `allocate()` takes
+  `sector_scores` and `holdings` (a `Holding` per stock, lots combined).
+- **`paper_trader.py`** — `holdings()` builds those `Holding`s; an add is its own
+  ledger row ("lot") with its own stop and exits, `note` = "Add #n to a winning
+  position".
+- **`backtest/simulator.py`** uses the same helpers and constants; positions are
+  keyed by lot. `BacktestConfig` gained `max_total_positions`,
+  `weighted_sector_slots`, `allow_pyramiding`, `risk_scale`,
+  `max_portfolio_heat_pct`, `max_deployed_capital_pct` (defaults = live).
+- **Backtest equity bug fixed.** `cash` in the simulator is starting capital plus
+  realized P&L (buys are never deducted), but the daily equity added each open
+  position's full market value, double-counting it. Every backtest CAGR/drawdown/
+  Sharpe recorded before 2026-10-07 (STRATEGY.md §8-§16, the Task 8 numbers above)
+  is affected; §17 has corrected numbers. Trade-level stats (win rate, avg R) were
+  not affected.
+- **`backtest/run_portfolio_backtest.py`** + **`.github/workflows/backtest.yml`** —
+  old-vs-new rules comparison on 10y data. Runs on GitHub Actions (on push to a
+  non-main branch touching `backtest/**` or the allocator, or manually) because
+  this repo's cloud sessions can't reach Yahoo/NSE; the table is in the run's
+  summary page.
