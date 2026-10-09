@@ -51,9 +51,12 @@ jobs:
           ref: main
           fetch-depth: 0
 
-      # The latest *completed* NSE session (weekends skipped; holidays aren't
-      # known here, so a holiday's first run processes the prior session again
-      # and records the holiday as checked).
+      # The latest *completed* NSE session (weekends skipped; must match
+      # stock_fetcher.latest_completed_session). main.py writes the session its
+      # price data actually ended on to docs/data/last_session.txt, so a run
+      # whose data came back stale is retried by the next slot. Holidays aren't
+      # known here: on one, every slot re-runs the prior session (harmless, but
+      # each sends an email).
       - name: Skip if the latest session was already processed
         id: guard
         run: |
@@ -101,10 +104,6 @@ jobs:
           RISK_PCT_PER_TRADE:   ${{ secrets.RISK_PCT_PER_TRADE || '1.0' }}
           PAGES_BASE_URL:       ${{ secrets.PAGES_BASE_URL }}
         run: python main.py
-
-      - name: Record the session as processed
-        if: steps.guard.outputs.skip != 'true' && success()
-        run: echo "${{ steps.guard.outputs.session }}" > docs/data/last_session.txt
 
       # Runs even if the screener step failed (e.g. email) — the report, dashboard
       # and paper-trading files are the product; email is just delivery.

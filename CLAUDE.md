@@ -80,8 +80,10 @@ of 100 tickers, handling its MultiIndex column layout, requiring ≥60 rows of h
 Deployment: `.github/workflows/schedule.yml` runs every weekday after the NSE close —
 18:17 IST primary, with backups at 21:47, 01:17 and 05:47 IST, because GitHub's
 scheduler started jobs 5-8 hours late (2026-10). Whichever slot runs first processes
-the latest completed session and writes it to `docs/data/last_session.txt`; the rest
-see it and exit in seconds. Manual `workflow_dispatch` always runs (untick `force` to
+the latest completed session; `main.py` writes the session its price data *actually*
+ended on to `docs/data/last_session.txt`, and later slots skip only if that matches
+(so a run whose Yahoo data came back stale is retried — on 2026-10-08 the run got no
+Oct 8 bars, and the old guard, which recorded the *expected* session, skipped every retry). Manual `workflow_dispatch` always runs (untick `force` to
 get the same skip). The checkout is always the latest `main`, never the run's original
 commit — "Re-run" on an old run used to check out a stale paper account and then fail
 to push (2026-10-06). It runs `python main.py`, then commits `docs/**`,
