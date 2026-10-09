@@ -419,8 +419,14 @@ real index" framing — don't let a future session read this CAGR at face value.
   from `fetch_stock_data(fill_from_nse=True)` and `sector_rotation._fetch_benchmark`.
   Each filled bar is rescaled by Yahoo's last close / the bhavcopy's PREV_CLOSE when
   they differ (>0.5%) — on a split/bonus ex-date NSE's raw price would otherwise show as
-  an 80-90% crash. Found 2026-10-09: Telecom's basket went +184% → −6% (6M) in one run
-  because of an unscaled NSE bar; the Oct 9 orders were removed and the session re-run.
+  an 80-90% crash. Logs the stocks the bhavcopy has no EQ row for.
+- **Sector basket bug (found 2026-10-09).** `_synthetic_sector_series` averaged only the
+  members present on each day; members carry very different weights (close / first close:
+  STLTECH 8.5, TTML 0.6), so a heavy member missing one bar swung the whole basket —
+  Telecom's 1M return went +38% → −51% because STLTECH and HFCL had no Oct 9 bar. Now
+  forward-filled (same in `backtest/simulator.py`). `backtest/inspect_sector.py` prints
+  each member's weight and bar count. The Oct 9 orders were booked twice from the broken
+  ranking, removed, and the session re-run.
 - **`main.py`** — skips any qualifier whose prices end before the market date (never
   orders on stale data); writes `docs/data/last_session.txt` from `trader.as_of`; appends
   one row per run to `docs/data/feed_log.csv` (Yahoo coverage of the expected session,

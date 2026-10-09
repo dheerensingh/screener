@@ -276,7 +276,8 @@ def run_backtest(
                 continue
             normalized.append(c / c.iloc[0])
         if normalized:
-            sector_synthetic[sector] = pd.concat(normalized, axis=1).mean(axis=1)
+            # Forward-fill like sector_rotation._synthetic_sector_series: a missing day keeps the last close.
+            sector_synthetic[sector] = pd.concat(normalized, axis=1).sort_index().ffill().mean(axis=1)
 
     sector_ret = {
         sector: {
