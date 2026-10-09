@@ -14,9 +14,10 @@ fill_stock_gaps() / fill_index_gaps() add a bar from these files for any of the
 last RECENT_SESSIONS trading days that Yahoo is missing. Only recent gaps are
 filled: the point is a correct latest session, not repairing old history.
 
-NSE's prices are unadjusted while Yahoo's history is split/dividend-adjusted.
-For the latest few sessions the two agree except across a corporate action in
-that window — a stated, small risk, logged per filled bar.
+NSE's prices are unadjusted while Yahoo's history is split/dividend-adjusted,
+and on 2026-10-09 a few stocks' Yahoo history turned out to be on a different
+scale altogether. Each filled bar is therefore rescaled by Yahoo's last close /
+NSE's PREV_CLOSE whenever those disagree, so the series never jumps at the seam.
 """
 
 import io
@@ -34,6 +35,7 @@ INDEX_URL = "https://archives.nseindia.com/content/indices/ind_close_all_{d}.csv
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                          "(KHTML, like Gecko) Chrome/120.0 Safari/537.36"}
 RECENT_SESSIONS = 5
+MAX_UNSCALED_GAP = 0.005  # Yahoo last close vs NSE PREV_CLOSE; beyond this the NSE bar is rescaled
 
 _bhav_cache: dict[date, Optional[pd.DataFrame]] = {}
 FILLED: dict[str, set] = {}  # session ISO date -> tickers filled this process (for main.py's feed log)
@@ -87,6 +89,7 @@ def bhavcopy(d: date) -> Optional[pd.DataFrame]:
                 "Low": pd.to_numeric(eq["LOW_PRICE"], errors="coerce").values,
                 "Close": pd.to_numeric(eq["CLOSE_PRICE"], errors="coerce").values,
                 "Volume": pd.to_numeric(eq["TTL_TRD_QNTY"], errors="coerce").values,
+                "PrevClose": pd.to_numeric(eq["PREV_CLOSE"], errors="coerce").values,
             }, index=eq["SYMBOL"].values).dropna(subset=["Close"])
         _bhav_cache[d] = out
     return _bhav_cache[d]
@@ -145,15 +148,30 @@ def fill_stock_gaps(data: dict[str, pd.DataFrame], sessions: Optional[list[date]
         if bhav is None:
             logger.info("NSE bhavcopy for %s not available; %d stock(s) stay without that bar", d, len(missing))
             continue
-        n = 0
+        n, rescaled = 0, []
         for t in missing:
             if t not in bhav.index:
                 continue
             df = data[t]
-            row = bhav.loc[[t], ["Open", "High", "Low", "Close", "Volume"]]
+            before = df[df.index < _stamp(df.index, d)]
+            nse_prev = float(bhav.at[t, "PrevClose"])
+            if before.empty or not nse_prev > 0:
+                continue
+            # Put NSE's bar on Yahoo's price basis. Yahoo's history is adjusted
+            # for splits/bonuses (and sometimes just wrong), so the two can differ
+            # by a constant factor; appending NSE's raw price would then create a
+            # fake jump. NSE's own PREV_CLOSE vs Yahoo's last close gives the factor.
+            ratio = float(before["Close"].iloc[-1]) / nse_prev
+            row = bhav.loc[[t], ["Open", "High", "Low", "Close", "Volume"]].copy()
+            if abs(ratio - 1) > MAX_UNSCALED_GAP:
+                row[["Open", "High", "Low", "Close"]] *= ratio
+                rescaled.append(f"{t} x{ratio:.3f}")
             row.index = [_stamp(df.index, d)]
             data[t] = pd.concat([df, row[df.columns.intersection(row.columns)]]).sort_index()
             n += 1
+        if rescaled:
+            logger.warning("NSE bars for %s rescaled to Yahoo's price basis (Yahoo last close != NSE previous "
+                           "close): %s", d, ", ".join(rescaled))
         if n:
             filled[d.isoformat()] = n
             FILLED.setdefault(d.isoformat(), set()).update(t for t in missing if t in bhav.index)
