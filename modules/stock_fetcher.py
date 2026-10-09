@@ -68,6 +68,17 @@ def drop_unsettled_bar(
     return data[idx.normalize() < pd.Timestamp(now.date())]
 
 
+def _drop_holiday_bars(df: pd.DataFrame) -> pd.DataFrame:
+    """Yahoo sometimes has a bar on a day NSE was closed (2026-01-15, per the audit)."""
+    from .market_calendar import load_holidays
+
+    holidays = load_holidays()
+    if not holidays or df.empty:
+        return df
+    idx = df.index.tz_localize(None) if getattr(df.index, "tz", None) is not None else df.index
+    return df[~idx.normalize().isin(pd.to_datetime(list(holidays)))]
+
+
 def _to_ns_ticker(ticker: str) -> str:
     """Append NSE suffix if not already present."""
     t = ticker.strip().upper()
@@ -195,6 +206,7 @@ def _clean(df: pd.DataFrame, ticker: str) -> Optional[pd.DataFrame]:
 
     df.sort_index(inplace=True)
     df = drop_unsettled_bar(df)
+    df = _drop_holiday_bars(df)
     if len(df) < MIN_REQUIRED_ROWS:
         return None
     return df
