@@ -14,7 +14,7 @@ Key design decisions:
 import math
 import logging
 import time
-from datetime import datetime, time as dtime, timedelta
+from datetime import datetime, time as dtime
 from typing import Optional, Union
 from zoneinfo import ZoneInfo
 
@@ -33,18 +33,19 @@ IST = ZoneInfo("Asia/Kolkata")
 SESSION_SETTLED_AT = dtime(16, 0)
 
 
-def latest_completed_session(now: Optional[datetime] = None) -> str:
+def latest_completed_session(now: Optional[datetime] = None, holidays: Optional[dict[str, str]] = None) -> str:
     """
-    The most recent NSE session that should have a final daily bar by `now`
-    (weekends skipped; exchange holidays aren't known here). Must match the
+    The most recent NSE session that should have a final daily bar by `now`,
+    skipping weekends and NSE holidays (market_calendar). Must match the
     skip-guard in .github/workflows/schedule.yml.
     """
+    from .market_calendar import is_trading_day, load_holidays, previous_trading_day
+
+    holidays = load_holidays() if holidays is None else holidays
     now = (now or datetime.now(IST)).astimezone(IST)
     d = now.date()
-    if now.weekday() > 4 or now.time() < SESSION_SETTLED_AT:
-        d -= timedelta(days=1)
-    while d.weekday() > 4:
-        d -= timedelta(days=1)
+    if not is_trading_day(d, holidays) or now.time() < SESSION_SETTLED_AT:
+        d = previous_trading_day(d, holidays)
     return d.isoformat()
 
 
@@ -80,6 +81,7 @@ def fetch_stock_data(
     period: str = "6mo",
     interval: str = "1d",
     chunk_size: int = 100,
+    fill_from_nse: bool = True,
 ) -> dict[str, pd.DataFrame]:
     """
     Fetches OHLCV data for all tickers in chunks to handle 500+ symbols safely.
@@ -95,6 +97,9 @@ def fetch_stock_data(
     NOTE: group_by="ticker" reverses the levels (ticker at 0, field at 1),
     which breaks xs(ticker, level=1). We intentionally omit group_by to keep
     the standard (field, ticker) layout.
+
+    fill_from_nse: add NSE bhavcopy bars for recent sessions Yahoo is missing
+    (nse_eod.fill_stock_gaps). Off only where Yahoo itself is being measured.
     """
     ns_tickers = [_to_ns_ticker(t) for t in tickers]
     orig_map = {_to_ns_ticker(t): t for t in tickers}  # ns_ticker → original
@@ -153,6 +158,12 @@ def fetch_stock_data(
             time.sleep(CHUNK_SLEEP_SEC)
 
     logger.info("Data ready: %d / %d tickers", len(result), len(tickers))
+    if fill_from_nse and interval == "1d" and result:
+        from .nse_eod import fill_stock_gaps  # Yahoo sometimes lacks a session NSE traded
+        try:
+            fill_stock_gaps(result)
+        except Exception as exc:
+            logger.warning("NSE gap-fill failed (non-fatal, Yahoo data used as is): %s", exc)
     return result
 
 

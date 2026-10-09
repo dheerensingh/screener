@@ -18,3 +18,4 @@ env/
 
 # Backtest data cache (regenerable via backtest/data_cache.py, large binary files)
 backtest/cache/
+audit_mismatches.csv

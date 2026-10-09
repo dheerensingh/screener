@@ -403,3 +403,26 @@ real index" framing — don't let a future session read this CAGR at face value.
   non-main branch touching `backtest/**` or the allocator, or manually) because
   this repo's cloud sessions can't reach Yahoo/NSE; the table is in the run's
   summary page.
+
+## Task 10 (2026-10-09): NSE holiday calendar, Yahoo gap-fill from NSE, data audit
+
+- **What went wrong on 2026-10-08.** The run (started 00:32 IST Oct 9, ~6h late) got
+  Yahoo data ending Oct 7; the old guard recorded the *expected* session, so backups
+  skipped. Even at 13:39 IST Oct 9, 130/431 stocks had no Oct 8 bar on Yahoo, and
+  GLAND was booked from its stale Oct 7 data (cancelled by hand in the ledger).
+- **`modules/market_calendar.py`** — NSE trading holidays from nseindia.com's
+  `holiday-master` API, cached in `docs/data/nse_holidays.json` (committed; refreshed
+  by `main.py` every 30 days; hand-editable). The workflow guard and
+  `stock_fetcher.latest_completed_session()` skip those dates.
+- **`modules/nse_eod.py`** — for any of the last 5 sessions Yahoo lacks, adds the bar
+  from NSE's own bhavcopy (stocks) / `ind_close_all` (Nifty 500). Called by default
+  from `fetch_stock_data(fill_from_nse=True)` and `sector_rotation._fetch_benchmark`.
+  NSE prices are unadjusted — fine for recent bars except across a corporate action.
+- **`main.py`** — skips any qualifier whose prices end before the market date (never
+  orders on stale data); writes `docs/data/last_session.txt` from `trader.as_of`; appends
+  one row per run to `docs/data/feed_log.csv` (Yahoo coverage of the expected session,
+  bars filled from NSE, whether NSE had published) — the only way to measure Yahoo's
+  *timeliness*, which can't be reconstructed later.
+- **`backtest/audit_data_feed.py`** + **`.github/workflows/data-audit.yml`** — a year of
+  Yahoo bars vs NSE's files: missing days, extra days, daily-return mismatches.
+  Measures completeness/accuracy, not lateness.

@@ -51,24 +51,29 @@ jobs:
           ref: main
           fetch-depth: 0
 
-      # The latest *completed* NSE session (weekends skipped; must match
+      # The latest *completed* NSE session, skipping weekends and the NSE
+      # holidays cached in docs/data/nse_holidays.json (must match
       # stock_fetcher.latest_completed_session). main.py writes the session its
       # price data actually ended on to docs/data/last_session.txt, so a run
-      # whose data came back stale is retried by the next slot. Holidays aren't
-      # known here: on one, every slot re-runs the prior session (harmless, but
-      # each sends an email).
+      # whose data came back stale is retried by the next slot.
       - name: Skip if the latest session was already processed
         id: guard
         run: |
           session=$(python3 - <<'PY'
+          import json
           from datetime import datetime, timedelta
           from zoneinfo import ZoneInfo
+          try:
+              holidays = json.load(open("docs/data/nse_holidays.json"))["holidays"]
+          except Exception:
+              holidays = {}
+          trading = lambda d: d.weekday() < 5 and d.isoformat() not in holidays
           now = datetime.now(ZoneInfo("Asia/Kolkata"))
           d = now.date()
-          if now.weekday() > 4 or now.hour < 16:
+          if not trading(d) or now.hour < 16:
               d -= timedelta(days=1)
-          while d.weekday() > 4:
-              d -= timedelta(days=1)
+              while not trading(d):
+                  d -= timedelta(days=1)
           print(d)
           PY
           )
