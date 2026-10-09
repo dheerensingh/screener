@@ -148,9 +148,10 @@ def fill_stock_gaps(data: dict[str, pd.DataFrame], sessions: Optional[list[date]
         if bhav is None:
             logger.info("NSE bhavcopy for %s not available; %d stock(s) stay without that bar", d, len(missing))
             continue
-        n, rescaled = 0, []
+        n, rescaled, absent = 0, [], []
         for t in missing:
             if t not in bhav.index:
+                absent.append(t)
                 continue
             df = data[t]
             before = df[df.index < _stamp(df.index, d)]
@@ -169,6 +170,9 @@ def fill_stock_gaps(data: dict[str, pd.DataFrame], sessions: Optional[list[date]
             row.index = [_stamp(df.index, d)]
             data[t] = pd.concat([df, row[df.columns.intersection(row.columns)]]).sort_index()
             n += 1
+        if absent:
+            logger.warning("NSE bhavcopy for %s has no EQ row for %d stock(s) Yahoo is missing — left "
+                           "without that bar: %s", d, len(absent), ", ".join(sorted(absent)))
         if rescaled:
             logger.warning("NSE bars for %s rescaled to Yahoo's price basis (Yahoo last close != NSE previous "
                            "close): %s", d, ", ".join(rescaled))

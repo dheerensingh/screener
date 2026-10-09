@@ -85,7 +85,16 @@ def _avg_daily_value(df: pd.DataFrame, lookback: int = LIQUIDITY_LOOKBACK_DAYS) 
 
 
 def _synthetic_sector_series(data: dict[str, pd.DataFrame]) -> pd.Series:
-    """Equal-weight average of each basket member's normalized close price."""
+    """
+    Equal-weight average of each basket member's normalized close price.
+
+    A member missing a day keeps its previous close for that day (forward
+    fill) rather than dropping out of the average: members carry very
+    different weights (close / first close — 8.5 for STLTECH vs 0.6 for TTML
+    on 2026-10-09), so averaging only the members present on a day made the
+    basket jump. STLTECH and HFCL missing the Oct 9 bar alone took Telecom's
+    1M return from +38% to -51%.
+    """
     normalized = []
     for df in data.values():
         close = df["Close"].dropna()
@@ -94,7 +103,7 @@ def _synthetic_sector_series(data: dict[str, pd.DataFrame]) -> pd.Series:
         normalized.append(close / close.iloc[0])
     if not normalized:
         return pd.Series(dtype=float)
-    return pd.concat(normalized, axis=1).mean(axis=1)
+    return pd.concat(normalized, axis=1).sort_index().ffill().mean(axis=1)
 
 
 def _compute_breadth(all_data: dict[str, pd.DataFrame], sma_period: int = 50) -> float:
