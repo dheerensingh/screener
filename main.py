@@ -57,6 +57,9 @@ from modules.report_generator import SectorBundle, build_report_html, publish_re
 from modules.paper_trader import PaperTrader
 from modules.dashboard import build_dashboard_html, publish_dashboard
 from modules.email_alerter import build_summary_email, send_email, send_error_email
+from modules.stock_fetcher import latest_completed_session
+
+import pandas as pd
 
 logging.basicConfig(
     level=logging.INFO,
@@ -64,6 +67,8 @@ logging.basicConfig(
     handlers=[logging.StreamHandler(sys.stdout)],
 )
 logger = logging.getLogger("screener.main")
+
+LAST_SESSION_PATH = os.path.join("docs", "data", "last_session.txt")
 
 
 def main() -> int:
@@ -179,6 +184,17 @@ def main() -> int:
         logger.info("Step 3b: Updating paper account (fills, exits, mark-to-market) ...")
         price_data = {t: df for s in rotation.scores for t, df in s.data.items()}
         trader.update(price_data)
+        last_bars = pd.Series([df.index[-1].strftime("%Y-%m-%d") for df in price_data.values() if len(df)])
+        logger.info("  Last daily bar per stock: %s; benchmark: %s",
+                    last_bars.value_counts().head(3).to_dict(),
+                    rotation.benchmark.index[-1].strftime("%Y-%m-%d") if len(rotation.benchmark) else "none")
+        expected = latest_completed_session()
+        if trader.as_of and trader.as_of < expected:
+            msg = (f"Price data ends {trader.as_of}, but the {expected} session should be complete — "
+                   f"Yahoo hasn't published it yet, or {expected} was an exchange holiday. "
+                   f"The next scheduled run will retry.")
+            logger.warning(msg)
+            errors.append(msg)
         logger.info(
             "  As of %s: %d filled, %d closed, %d cancelled, %d open",
             trader.as_of, len(trader.filled_today), len(trader.closed_today),
@@ -224,6 +240,12 @@ def main() -> int:
         bench_close = float(bench.loc[:trader.as_of].iloc[-1]) if trader.as_of else float(bench.iloc[-1])
         trader.snapshot(bench_close)
         trader.save()
+        # The workflow's skip-guard compares this to the latest completed session,
+        # so a run whose data came back stale is retried by the next backup slot.
+        if trader.as_of:
+            os.makedirs(os.path.dirname(LAST_SESSION_PATH), exist_ok=True)
+            with open(LAST_SESSION_PATH, "w", encoding="utf-8") as f:
+                f.write(trader.as_of + "\n")
     except Exception as exc:
         msg = f"Step 3b/3c (paper account) crashed: {exc}"
         logger.exception(msg)

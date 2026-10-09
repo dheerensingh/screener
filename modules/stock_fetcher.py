@@ -14,7 +14,7 @@ Key design decisions:
 import math
 import logging
 import time
-from datetime import datetime, time as dtime
+from datetime import datetime, time as dtime, timedelta
 from typing import Optional, Union
 from zoneinfo import ZoneInfo
 
@@ -31,6 +31,21 @@ IST = ZoneInfo("Asia/Kolkata")
 # NSE closes at 15:30 IST; yfinance's daily bar is final a little after that.
 # Before this, today's bar (if any) is a live, still-forming candle.
 SESSION_SETTLED_AT = dtime(16, 0)
+
+
+def latest_completed_session(now: Optional[datetime] = None) -> str:
+    """
+    The most recent NSE session that should have a final daily bar by `now`
+    (weekends skipped; exchange holidays aren't known here). Must match the
+    skip-guard in .github/workflows/schedule.yml.
+    """
+    now = (now or datetime.now(IST)).astimezone(IST)
+    d = now.date()
+    if now.weekday() > 4 or now.time() < SESSION_SETTLED_AT:
+        d -= timedelta(days=1)
+    while d.weekday() > 4:
+        d -= timedelta(days=1)
+    return d.isoformat()
 
 
 def drop_unsettled_bar(
