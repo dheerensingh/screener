@@ -25,6 +25,8 @@ from typing import Optional
 import pandas as pd
 import requests
 
+from .nse_eod import equity_rows
+
 logger = logging.getLogger(__name__)
 
 NSE_BHAVCOPY_URL = "https://archives.nseindia.com/products/content/sec_bhavdata_full_{date}.csv"
@@ -56,7 +58,7 @@ def fetch_delivery_data(date: datetime) -> Optional[pd.DataFrame]:
     try:
         df = pd.read_csv(io.StringIO(resp.text))
         df.columns = [c.strip() for c in df.columns]
-        df = df[df["SERIES"].str.strip() == "EQ"]
+        df = equity_rows(df)
         out = df[["SYMBOL", "DELIV_PER"]].rename(
             columns={"SYMBOL": "ticker", "DELIV_PER": "deliv_per"}
         )

@@ -35,7 +35,7 @@ import requests
 
 from modules.sector_mapper import build_universe
 from modules.sector_rotation import BENCHMARK_TICKER, _fetch_benchmark
-from modules.nse_eod import _file_date_ok
+from modules.nse_eod import _file_date_ok, equity_rows
 from modules.stock_fetcher import fetch_stock_data
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -78,8 +78,7 @@ def recent_check(n_sessions: int) -> int:
             continue
         bhav = _get_csv(BHAV_URL.format(d=d.strftime("%d%m%Y")))
         if bhav is not None and _file_date_ok(bhav, "DATE1", d):
-            eq = bhav[bhav["SERIES"].str.strip() == "EQ"].copy()
-            eq["SYMBOL"] = eq["SYMBOL"].str.strip()
+            eq = equity_rows(bhav)
             sessions.append((d, eq.set_index("SYMBOL")))
         if len(sessions) >= n_sessions:
             break
@@ -134,8 +133,7 @@ def main() -> int:
         if bhav is None or not _file_date_ok(bhav, "DATE1", d):
             holidays.append(d)  # 404, or a file dated another day (NSE serves one on holidays)
             continue
-        eq = bhav[bhav["SERIES"].str.strip() == "EQ"].copy()
-        eq["SYMBOL"] = eq["SYMBOL"].str.strip()
+        eq = equity_rows(bhav)
         eq = eq.set_index("SYMBOL")
         nse_close[d] = pd.to_numeric(eq["CLOSE_PRICE"], errors="coerce")
         nse_prev[d] = pd.to_numeric(eq["PREV_CLOSE"], errors="coerce")
