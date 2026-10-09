@@ -66,10 +66,55 @@ def _get_csv(url: str) -> pd.DataFrame | None:
     raise RuntimeError(f"Could not fetch {url}")
 
 
+def recent_check(n_sessions: int) -> int:
+    """Per stock: Yahoo close / NSE close for each of the last n sessions; lists every ratio off by >2%."""
+    universe = build_universe()
+    sector_of = {u.ticker: u.sector for u in universe}
+    yahoo = fetch_stock_data(sorted(sector_of), period="1y", fill_from_nse=False)
+    sessions = []
+    for back in range(0, 30):
+        d = date.today() - timedelta(days=back)
+        if d.weekday() >= 5:
+            continue
+        bhav = _get_csv(BHAV_URL.format(d=d.strftime("%d%m%Y")))
+        if bhav is not None and _file_date_ok(bhav, "DATE1", d):
+            eq = bhav[bhav["SERIES"].str.strip() == "EQ"].copy()
+            eq["SYMBOL"] = eq["SYMBOL"].str.strip()
+            sessions.append((d, eq.set_index("SYMBOL")))
+        if len(sessions) >= n_sessions:
+            break
+    rows = []
+    for d, eq in sessions:
+        for t, df in yahoo.items():
+            on_day = df[df.index.normalize() == pd.Timestamp(d)]
+            if on_day.empty or t not in eq.index:
+                continue
+            y = float(on_day["Close"].iloc[-1])
+            n = float(pd.to_numeric(eq.loc[t, "CLOSE_PRICE"], errors="coerce"))
+            if n and abs(y / n - 1) > 0.02:
+                rows.append((d, t, sector_of.get(t, ""), round(y, 2), round(n, 2), round(y / n, 3)))
+    lines = [f"### Yahoo vs NSE closes, last {len(sessions)} sessions ({', '.join(str(s[0]) for s in sessions)})", "",
+             f"Stock-days where Yahoo's close differs from NSE's by >2%: **{len(rows)}**", "",
+             "| Date | Stock | Sector | Yahoo close | NSE close | Ratio |", "|---|---|---|---|---|---|"]
+    lines += [f"| {r[0]} | {r[1]} | {r[2]} | {r[3]} | {r[4]} | {r[5]} |" for r in sorted(rows, key=lambda r: (r[1], r[0]))]
+    last = {t: df.index[-1].date() for t, df in yahoo.items() if len(df)}
+    lines += ["", "Yahoo last bar per stock: " + str(pd.Series(last).value_counts().to_dict())]
+    text = "\n".join(lines)
+    print(text)
+    if os.environ.get("GITHUB_STEP_SUMMARY"):
+        with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as f:
+            f.write(text + "\n")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--days", type=int, default=365)
+    parser.add_argument("--recent", type=int, default=0,
+                        help="instead: compare Yahoo vs NSE closes, stock by stock, for the last N sessions")
     args = parser.parse_args()
+    if args.recent:
+        return recent_check(args.recent)
 
     tickers = sorted({u.ticker for u in build_universe()})
     yahoo = fetch_stock_data(tickers, period="2y", fill_from_nse=False)  # 2y so the first audited day has a previous close

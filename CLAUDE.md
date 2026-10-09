@@ -417,7 +417,10 @@ real index" framing — don't let a future session read this CAGR at face value.
 - **`modules/nse_eod.py`** — for any of the last 5 sessions Yahoo lacks, adds the bar
   from NSE's own bhavcopy (stocks) / `ind_close_all` (Nifty 500). Called by default
   from `fetch_stock_data(fill_from_nse=True)` and `sector_rotation._fetch_benchmark`.
-  NSE prices are unadjusted — fine for recent bars except across a corporate action.
+  Each filled bar is rescaled by Yahoo's last close / the bhavcopy's PREV_CLOSE when
+  they differ (>0.5%) — on a split/bonus ex-date NSE's raw price would otherwise show as
+  an 80-90% crash. Found 2026-10-09: Telecom's basket went +184% → −6% (6M) in one run
+  because of an unscaled NSE bar; the Oct 9 orders were removed and the session re-run.
 - **`main.py`** — skips any qualifier whose prices end before the market date (never
   orders on stale data); writes `docs/data/last_session.txt` from `trader.as_of`; appends
   one row per run to `docs/data/feed_log.csv` (Yahoo coverage of the expected session,
