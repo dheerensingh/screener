@@ -35,6 +35,10 @@ INDEX_URL = "https://archives.nseindia.com/content/indices/ind_close_all_{d}.csv
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                          "(KHTML, like Gecko) Chrome/120.0 Safari/537.36"}
 RECENT_SESSIONS = 5
+# Cash-equity series in the bhavcopy. EQ is normal trading; BE/BZ are NSE's
+# trade-for-trade segments, where stocks under surveillance (often after a sharp
+# rally) are moved — HFCL, STLTECH and MTARTECH had only a BE row on 2026-10-09.
+EQUITY_SERIES = ("EQ", "BE", "BZ")
 MAX_UNSCALED_GAP = 0.005  # Yahoo last close vs NSE PREV_CLOSE; beyond this the NSE bar is rescaled
 
 _bhav_cache: dict[date, Optional[pd.DataFrame]] = {}
@@ -75,14 +79,23 @@ def _file_date_ok(df: pd.DataFrame, column: str, d: date) -> bool:
     return True
 
 
+def equity_rows(raw: pd.DataFrame) -> pd.DataFrame:
+    """The bhavcopy's cash-equity rows, one per symbol (EQ preferred over BE/BZ)."""
+    eq = raw.copy()
+    eq["SERIES"] = eq["SERIES"].astype(str).str.strip()
+    eq["SYMBOL"] = eq["SYMBOL"].astype(str).str.strip()
+    eq = eq[eq["SERIES"].isin(EQUITY_SERIES)]
+    eq["_rank"] = eq["SERIES"].map({s: i for i, s in enumerate(EQUITY_SERIES)})
+    return eq.sort_values("_rank").drop_duplicates("SYMBOL").drop(columns="_rank")
+
+
 def bhavcopy(d: date) -> Optional[pd.DataFrame]:
     """EQ-series OHLCV for every NSE stock on `d`, indexed by symbol; None if unavailable."""
     if d not in _bhav_cache:
         raw = _get_csv(BHAV_URL.format(d=d.strftime("%d%m%Y")))
         out = None
         if raw is not None and "SERIES" in raw and _file_date_ok(raw, "DATE1", d):
-            eq = raw[raw["SERIES"].astype(str).str.strip() == "EQ"].copy()
-            eq["SYMBOL"] = eq["SYMBOL"].astype(str).str.strip()
+            eq = equity_rows(raw)
             out = pd.DataFrame({
                 "Open": pd.to_numeric(eq["OPEN_PRICE"], errors="coerce").values,
                 "High": pd.to_numeric(eq["HIGH_PRICE"], errors="coerce").values,
@@ -171,7 +184,7 @@ def fill_stock_gaps(data: dict[str, pd.DataFrame], sessions: Optional[list[date]
             data[t] = pd.concat([df, row[df.columns.intersection(row.columns)]]).sort_index()
             n += 1
         if absent:
-            logger.warning("NSE bhavcopy for %s has no EQ row for %d stock(s) Yahoo is missing — left "
+            logger.warning("NSE bhavcopy for %s has no EQ/BE/BZ row for %d stock(s) Yahoo is missing — left "
                            "without that bar: %s", d, len(absent), ", ".join(sorted(absent)))
         if rescaled:
             logger.warning("NSE bars for %s rescaled to Yahoo's price basis (Yahoo last close != NSE previous "

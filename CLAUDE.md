@@ -419,7 +419,8 @@ real index" framing — don't let a future session read this CAGR at face value.
   from `fetch_stock_data(fill_from_nse=True)` and `sector_rotation._fetch_benchmark`.
   Each filled bar is rescaled by Yahoo's last close / the bhavcopy's PREV_CLOSE when
   they differ (>0.5%) — on a split/bonus ex-date NSE's raw price would otherwise show as
-  an 80-90% crash. Logs the stocks the bhavcopy has no EQ row for.
+  an 80-90% crash. Reads EQ, BE and BZ rows (`nse_eod.equity_rows`; HFCL, STLTECH and
+  MTARTECH were trade-for-trade BE-only on 2026-10-09) and logs stocks with none.
 - **Sector basket bug (found 2026-10-09).** `_synthetic_sector_series` averaged only the
   members present on each day; members carry very different weights (close / first close:
   STLTECH 8.5, TTML 0.6), so a heavy member missing one bar swung the whole basket —
