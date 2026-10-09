@@ -119,14 +119,21 @@ def _compute_breadth(all_data: dict[str, pd.DataFrame], sma_period: int = 50) ->
     return (above / total * 100.0) if total else float("nan")
 
 
-def _fetch_benchmark(period: str) -> pd.Series:
+def _fetch_benchmark(period: str, fill_from_nse: bool = True) -> pd.Series:
     df = yf.download(BENCHMARK_TICKER, period=period, interval="1d", auto_adjust=True, progress=False)
     if df.empty:
         raise RuntimeError(f"No benchmark data returned for {BENCHMARK_TICKER}")
     close = df["Close"]
     if isinstance(close, pd.DataFrame):
         close = close.iloc[:, 0]
-    return drop_unsettled_bar(close.dropna())
+    close = drop_unsettled_bar(close.dropna())
+    if fill_from_nse:
+        from .nse_eod import fill_index_gaps
+        try:
+            close = fill_index_gaps(close, "Nifty 500")
+        except Exception as exc:
+            logger.warning("NSE benchmark gap-fill failed (non-fatal): %s", exc)
+    return close
 
 
 def rank_sectors(period: str = "1y") -> RotationResult:

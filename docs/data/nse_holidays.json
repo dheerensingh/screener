@@ -1,0 +1,21 @@
+{
+ "source": "seeded 2026-10-09 from backtest/audit_data_feed.py (weekdays with no NSE bhavcopy dated that day); refreshed from NSE holiday-master by main.py",
+ "fetched": null,
+ "holidays": {
+  "2025-10-22": "NSE closed (no bhavcopy)",
+  "2025-11-05": "NSE closed (no bhavcopy)",
+  "2025-12-25": "NSE closed (no bhavcopy)",
+  "2026-01-15": "NSE closed (no bhavcopy)",
+  "2026-01-26": "NSE closed (no bhavcopy)",
+  "2026-03-03": "NSE closed (no bhavcopy)",
+  "2026-03-26": "NSE closed (no bhavcopy)",
+  "2026-03-31": "NSE closed (no bhavcopy)",
+  "2026-04-03": "NSE closed (no bhavcopy)",
+  "2026-04-14": "NSE closed (no bhavcopy)",
+  "2026-05-01": "NSE closed (no bhavcopy)",
+  "2026-05-28": "NSE closed (no bhavcopy)",
+  "2026-06-26": "NSE closed (no bhavcopy)",
+  "2026-09-14": "NSE closed (no bhavcopy)",
+  "2026-10-02": "NSE closed (no bhavcopy)"
+ }
+}

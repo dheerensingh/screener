@@ -33,6 +33,7 @@ backups) — see
 .github/workflows/schedule.yml. See CLAUDE.md for the architecture.
 """
 
+import csv
 import logging
 import os
 import sys
@@ -48,6 +49,8 @@ from modules.sector_rotation import rank_sectors, leading_sectors
 from modules.fundamental_analyzer import sector_confirmation
 from modules.governance_analyzer import sector_governance_check
 from modules.delivery_analyzer import fetch_latest_delivery_pct
+from modules.market_calendar import refresh_holidays
+from modules import nse_eod
 from modules.technical_analyzer import screen_stocks
 from modules.market_regime import evaluate as evaluate_market_regime
 from modules.fii_dii_flow import fetch_latest_flow
@@ -69,6 +72,43 @@ logging.basicConfig(
 logger = logging.getLogger("screener.main")
 
 LAST_SESSION_PATH = os.path.join("docs", "data", "last_session.txt")
+FEED_LOG_PATH = os.path.join("docs", "data", "feed_log.csv")
+
+
+def _log_feed_status(price_data: dict, benchmark: pd.Series, expected: str) -> None:
+    """
+    One row per run in FEED_LOG_PATH: did Yahoo (stocks, benchmark) and NSE's own
+    bhavcopy have the expected session yet? Builds the evidence for how often, and
+    how late, Yahoo lags — which can't be reconstructed after the fact.
+    """
+    last_bars = pd.Series([df.index[-1].strftime("%Y-%m-%d") for df in price_data.values() if len(df)])
+    nse_filled = len(nse_eod.FILLED.get(expected, set()) & set(price_data))
+    at_expected = int((last_bars >= expected).sum())
+    yahoo_pct = (at_expected - nse_filled) / len(last_bars) * 100.0 if len(last_bars) else 0.0
+    bench_last = benchmark.index[-1].strftime("%Y-%m-%d") if len(benchmark) else ""
+    try:
+        bhav = nse_eod.bhavcopy(datetime.strptime(expected, "%Y-%m-%d").date())
+        nse_has_it = "yes" if bhav is not None and len(bhav) else "no"
+    except Exception:
+        nse_has_it = "error"
+    row = {
+        "run_utc": datetime.utcnow().strftime("%Y-%m-%d %H:%M"), "expected_session": expected,
+        "stocks_last_bar": last_bars.mode().iloc[0] if len(last_bars) else "",
+        "yahoo_stocks_at_expected_pct": f"{yahoo_pct:.1f}",
+        "nse_filled_stocks": str(nse_filled),
+        "yahoo_benchmark_last_bar": bench_last, "nse_bhavcopy_available": nse_has_it,
+    }
+    logger.info("  Feed status: %s", row)
+    try:
+        new_file = not os.path.exists(FEED_LOG_PATH)
+        os.makedirs(os.path.dirname(FEED_LOG_PATH), exist_ok=True)
+        with open(FEED_LOG_PATH, "a", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=list(row))
+            if new_file:
+                writer.writeheader()
+            writer.writerow(row)
+    except OSError as exc:
+        logger.warning("Could not write feed log: %s", exc)
 
 
 def main() -> int:
@@ -76,6 +116,10 @@ def main() -> int:
     logger.info("=== Sector Screener starting at %s ===", start.strftime("%Y-%m-%d %H:%M:%S"))
 
     errors: list[str] = []
+    try:
+        refresh_holidays()  # NSE's holiday list for the skip-guard and latest_completed_session()
+    except Exception as exc:
+        logger.warning("Holiday list refresh crashed (non-fatal): %s", exc)
 
     # ── Step 1: Rank sectors by relative strength ────────────────────────────
     try:
@@ -184,15 +228,11 @@ def main() -> int:
         logger.info("Step 3b: Updating paper account (fills, exits, mark-to-market) ...")
         price_data = {t: df for s in rotation.scores for t, df in s.data.items()}
         trader.update(price_data)
-        last_bars = pd.Series([df.index[-1].strftime("%Y-%m-%d") for df in price_data.values() if len(df)])
-        logger.info("  Last daily bar per stock: %s; benchmark: %s",
-                    last_bars.value_counts().head(3).to_dict(),
-                    rotation.benchmark.index[-1].strftime("%Y-%m-%d") if len(rotation.benchmark) else "none")
         expected = latest_completed_session()
+        _log_feed_status(price_data, rotation.benchmark, expected)
         if trader.as_of and trader.as_of < expected:
             msg = (f"Price data ends {trader.as_of}, but the {expected} session should be complete — "
-                   f"Yahoo hasn't published it yet, or {expected} was an exchange holiday. "
-                   f"The next scheduled run will retry.")
+                   f"Yahoo hasn't published it yet. The next scheduled run will retry.")
             logger.warning(msg)
             errors.append(msg)
         logger.info(
@@ -200,6 +240,17 @@ def main() -> int:
             trader.as_of, len(trader.filled_today), len(trader.closed_today),
             len(trader.cancelled_today), len(trader.positions),
         )
+
+        # Never order a stock whose data stops before the market date: its signal
+        # would come from an older session (GLAND, 2026-10-09).
+        stale = {t: df.index[-1].strftime("%Y-%m-%d") for t, df in price_data.items()
+                 if trader.as_of and len(df) and df.index[-1].strftime("%Y-%m-%d") < trader.as_of}
+        stale_rejects = [(r, sector) for sector, rs in sector_qualifiers.items() for r in rs if r.ticker in stale]
+        if stale_rejects:
+            logger.warning("  Skipping %d qualifier(s) with stale prices: %s",
+                           len(stale_rejects), [r.ticker for r, _ in stale_rejects])
+        sector_qualifiers = {sector: [r for r in rs if r.ticker not in stale]
+                             for sector, rs in sector_qualifiers.items()}
 
         logger.info("Step 3c: Allocating new orders around current holdings ...")
         deployed_pct, heat_pct = trader.exposure_pct(account_size)
@@ -232,6 +283,10 @@ def main() -> int:
             for r in results:
                 candidates.append(dict(ticker=r.ticker, sector=sector, cap_band=r.cap_band, price=r.current_price,
                                        rsi=r.rsi, strength=r.strength_score, decision=decisions.get(r.ticker, "—")))
+        for r, sector in stale_rejects:
+            candidates.append(dict(ticker=r.ticker, sector=sector, cap_band=r.cap_band, price=r.current_price,
+                                   rsi=r.rsi, strength=r.strength_score,
+                                   decision=f"Skipped: prices end {stale[r.ticker]}, behind {trader.as_of}"))
         for r, sector, reason in governance_rejects:
             candidates.append(dict(ticker=r.ticker, sector=sector, cap_band=r.cap_band, price=r.current_price,
                                    rsi=r.rsi, strength=r.strength_score, decision=reason))
