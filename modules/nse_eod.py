@@ -57,12 +57,28 @@ def _get_csv(url: str) -> Optional[pd.DataFrame]:
         return None
 
 
+def _file_date_ok(df: pd.DataFrame, column: str, d: date) -> bool:
+    """
+    NSE's archive answers a holiday's URL with a file anyway (the 2026-10-09 audit
+    found a "bhavcopy" for all 14 weekday holidays of the past year), so a file
+    only counts if the date printed inside it is the date asked for.
+    """
+    if column not in df or df.empty:
+        return False
+    stamped = pd.to_datetime(df[column].astype(str).str.strip().iloc[0], dayfirst=True, errors="coerce")
+    if pd.isna(stamped) or stamped.date() != d:
+        logger.info("NSE file for %s is dated %s — not a trading day, or not published yet", d,
+                    df[column].iloc[0])
+        return False
+    return True
+
+
 def bhavcopy(d: date) -> Optional[pd.DataFrame]:
     """EQ-series OHLCV for every NSE stock on `d`, indexed by symbol; None if unavailable."""
     if d not in _bhav_cache:
         raw = _get_csv(BHAV_URL.format(d=d.strftime("%d%m%Y")))
         out = None
-        if raw is not None and "SERIES" in raw:
+        if raw is not None and "SERIES" in raw and _file_date_ok(raw, "DATE1", d):
             eq = raw[raw["SERIES"].astype(str).str.strip() == "EQ"].copy()
             eq["SYMBOL"] = eq["SYMBOL"].astype(str).str.strip()
             out = pd.DataFrame({
@@ -80,7 +96,7 @@ def index_close(d: date, name: str = "Nifty 500") -> Optional[float]:
     if d not in _index_cache:
         _index_cache[d] = _get_csv(INDEX_URL.format(d=d.strftime("%d%m%Y")))
     df = _index_cache[d]
-    if df is None or "Index Name" not in df:
+    if df is None or "Index Name" not in df or not _file_date_ok(df, "Index Date", d):
         return None
     row = df[df["Index Name"].astype(str).str.strip().str.lower() == name.lower()]
     if row.empty:

@@ -7,8 +7,9 @@ Compares the last year of Yahoo Finance daily bars (what the screener and paper
 account use) with NSE's own end-of-day files from archives.nseindia.com:
 
   - sec_bhavdata_full_DDMMYYYY.csv — every stock's open/high/low/close that day
-    (the same file delivery_analyzer.py reads). Its existence also tells us which
-    weekdays were trading days: a holiday 404s.
+    (the same file delivery_analyzer.py reads). It also tells us which weekdays
+    were trading days — by the DATE1 printed inside it, not by whether the URL
+    answers: NSE serves a file for holidays too.
   - ind_close_all_DDMMYYYY.csv — every NSE index's close, incl. Nifty 500.
 
 Reports: trading days Yahoo is missing (market-wide and per stock), bars Yahoo
@@ -34,6 +35,7 @@ import requests
 
 from modules.sector_mapper import build_universe
 from modules.sector_rotation import BENCHMARK_TICKER, _fetch_benchmark
+from modules.nse_eod import _file_date_ok
 from modules.stock_fetcher import fetch_stock_data
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -84,8 +86,8 @@ def main() -> int:
     holidays: list[date] = []
     for i, d in enumerate(weekdays):
         bhav = _get_csv(BHAV_URL.format(d=d.strftime("%d%m%Y")))
-        if bhav is None:
-            holidays.append(d)
+        if bhav is None or not _file_date_ok(bhav, "DATE1", d):
+            holidays.append(d)  # 404, or a file dated another day (NSE serves one on holidays)
             continue
         eq = bhav[bhav["SERIES"].str.strip() == "EQ"].copy()
         eq["SYMBOL"] = eq["SYMBOL"].str.strip()
@@ -93,7 +95,7 @@ def main() -> int:
         nse_close[d] = pd.to_numeric(eq["CLOSE_PRICE"], errors="coerce")
         nse_prev[d] = pd.to_numeric(eq["PREV_CLOSE"], errors="coerce")
         idx = _get_csv(INDEX_URL.format(d=d.strftime("%d%m%Y")))
-        if idx is not None:
+        if idx is not None and _file_date_ok(idx, "Index Date", d):
             row = idx[idx["Index Name"].str.strip().str.lower() == "nifty 500"]
             if len(row):
                 nse_index[d] = float(row["Closing Index Value"].iloc[0])
@@ -133,6 +135,7 @@ def main() -> int:
                 mismatches.append((d, t, round(y_ret, 2), round(n_ret, 2)))
 
     yahoo_days = pd.Series([ts.date() for df in yahoo.values() for ts in df.index]).value_counts()
+    real_missing = {d: n for d, n in missing_by_day.items() if n <= len(universe) / 2}
     extra_days = sorted(d for d, n in yahoo_days.items()
                         if start <= d <= end and d not in nse_close and n > len(universe) / 2)
     market_wide_missing = sorted(d for d, n in missing_by_day.items() if n > len(universe) / 2)
@@ -154,12 +157,13 @@ def main() -> int:
         f"### Yahoo vs NSE audit — {trading_days[0]} to {trading_days[-1]}",
         "",
         f"- Weekdays checked: **{len(weekdays)}** · NSE trading days: **{len(trading_days)}** · "
-        f"weekday holidays (no bhavcopy): **{len(holidays)}**",
+        f"weekday holidays (no bhavcopy for that date): **{len(holidays)}**",
         f"- Stocks compared: **{len(universe)}** (Nifty500 today) · stock-days compared: **{pairs:,}**",
         f"- Trading days Yahoo is missing **market-wide** (>50% of stocks): **{len(market_wide_missing)}** "
         + (f"— {', '.join(map(str, market_wide_missing[:10]))}" if market_wide_missing else ""),
         f"- Individual stock-days missing on Yahoo: **{total_missing:,}** "
-        f"({total_missing / max(pairs + total_missing, 1) * 100:.2f}%)",
+        f"({total_missing / max(pairs + total_missing, 1) * 100:.2f}%), on **{len(real_missing)}** days "
+        f"outside the market-wide ones",
         f"- Days Yahoo has bars but NSE was closed: **{len(extra_days)}** "
         + (f"— {', '.join(map(str, extra_days[:10]))}" if extra_days else ""),
         f"- Stock-days where Yahoo's daily return differs from NSE's by >{MISMATCH_PP:.0f}pp: "

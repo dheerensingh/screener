@@ -48,7 +48,7 @@ except ImportError:
 from modules.sector_rotation import rank_sectors, leading_sectors
 from modules.fundamental_analyzer import sector_confirmation
 from modules.governance_analyzer import sector_governance_check
-from modules.delivery_analyzer import fetch_delivery_data, fetch_latest_delivery_pct
+from modules.delivery_analyzer import fetch_latest_delivery_pct
 from modules.market_calendar import refresh_holidays
 from modules import nse_eod
 from modules.technical_analyzer import screen_stocks
@@ -87,7 +87,7 @@ def _log_feed_status(price_data: dict, benchmark: pd.Series, expected: str) -> N
     yahoo_pct = (at_expected - nse_filled) / len(last_bars) * 100.0 if len(last_bars) else 0.0
     bench_last = benchmark.index[-1].strftime("%Y-%m-%d") if len(benchmark) else ""
     try:
-        bhav = fetch_delivery_data(datetime.strptime(expected, "%Y-%m-%d"))
+        bhav = nse_eod.bhavcopy(datetime.strptime(expected, "%Y-%m-%d").date())
         nse_has_it = "yes" if bhav is not None and len(bhav) else "no"
     except Exception:
         nse_has_it = "error"
