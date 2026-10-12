@@ -11,3 +11,8 @@ trade_id,status,ticker,sector,cap_band,signal_date,signal_price,stop_distance,qu
 2026-10-07-ABDL,OPEN,ABDL,FMCG,Small,2026-10-07,694.25,50.63,37,1875.00,2.58,58.0,2026-10-08,699.80,649.17,,,,,,,
 2026-10-07-BALRAMCHIN,OPEN,BALRAMCHIN,FMCG,Small,2026-10-07,706.60,54.08,34,1875.00,0.59,59.4,2026-10-08,704.45,650.37,,,,,,,
 2026-10-07-GLAND,CANCELLED,GLAND,Pharma,Small,2026-10-07,3150.60,187.20,10,1875.00,3.68,67.8,,,,,,,,,,Cancelled by hand 2026-10-09: booked from stale (2026-10-07) Yahoo data
+2026-10-12-STLTECH,PENDING,STLTECH,Telecom,Small,2026-10-12,1014.15,81.13,11,937.50,2.75,75.1,,,,,,,,,,Add #1 to a winning position
+2026-10-12-TDPOWERSYS,PENDING,TDPOWERSYS,Capital Goods,Small,2026-10-12,825.65,66.05,14,937.50,2.61,61.2,,,,,,,,,,Add #1 to a winning position
+2026-10-12-PVRINOX,PENDING,PVRINOX,Media Entertainment & Publication,Small,2026-10-12,1401.30,107.28,17,1875.00,2.65,65.3,,,,,,,,,,
+2026-10-12-HFCL,PENDING,HFCL,Telecom,Small,2026-10-12,265.48,21.24,44,937.50,2.65,64.7,,,,,,,,,,Add #1 to a winning position
+2026-10-12-AZAD,PENDING,AZAD,Capital Goods,Small,2026-10-12,2968.40,237.47,3,937.50,1.58,57.7,,,,,,,,,,Add #1 to a winning position
