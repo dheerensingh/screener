@@ -16,3 +16,4 @@ trade_id,status,ticker,sector,cap_band,signal_date,signal_price,stop_distance,qu
 2026-10-12-PVRINOX,OPEN,PVRINOX,Media Entertainment & Publication,Small,2026-10-12,1401.30,107.28,17,1875.00,2.65,65.3,2026-10-13,1401.30,1294.02,,,,,,,
 2026-10-12-HFCL,OPEN,HFCL,Telecom,Small,2026-10-12,265.48,21.24,44,937.50,2.65,64.7,2026-10-13,265.48,244.24,,,,,,,Add #1 to a winning position
 2026-10-12-AZAD,OPEN,AZAD,Capital Goods,Small,2026-10-12,2968.40,237.47,3,937.50,1.58,57.7,2026-10-13,3021.10,2783.63,,,,,,,Add #1 to a winning position
+2026-10-14-CPPLUS,PENDING,CPPLUS,Capital Goods,Small,2026-10-14,4440.30,355.22,5,1875.00,3.71,71.1,,,,,,,,,,
