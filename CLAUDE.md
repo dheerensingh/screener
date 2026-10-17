@@ -436,3 +436,14 @@ real index" framing — don't let a future session read this CAGR at face value.
 - **`backtest/audit_data_feed.py`** + **`.github/workflows/data-audit.yml`** — a year of
   Yahoo bars vs NSE's files: missing days, extra days, daily-return mismatches.
   Measures completeness/accuracy, not lateness.
+
+## Task 11 (2026-10-17): fixes from two weeks of paper trading — tested, none adopted
+
+**STRATEGY.md §18 is the canonical reference.** `BacktestConfig` gained `stop_rule`
+("cap" live / "atr" / "skip_wide"), `add_min_open_r`, `reentry_cooldown_days`,
+`max_small_cap_heat_pct` and `regime_down_risk_scale` (defaults = live; results
+unchanged). `Trade` records `stop_capped`, `reentry_after_loss` and `add_open_r`.
+`run_portfolio_backtest.py` now runs the §18 variants and prints a per-condition
+trade split and a calendar-year return table. No live rule changed. Also fixed: the
+simulator's allocation loop reused `i`, the day index the drawdown circuit breaker
+reads (only matters with `apply_drawdown_circuit_breaker=True`).

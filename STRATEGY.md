@@ -945,3 +945,93 @@ entry + trailing exit, market filter off unless stated
   Treat this with §9's caveat: today's Nifty500 applied retroactively
   (survivorship bias), and no point-in-time sector membership. §8b's "loses to
   the index on every metric" conclusion was itself a product of the bug.
+
+## 18. Four fixes suggested by the first two weeks of paper trading — tested, none adopted (2026-10-17)
+
+**Why.** After 12 sessions (Oct 1-16) the paper account was -3.3% against
+Nifty500's +1.9%: 12 closed trades, 1 winner, -₹20,923. Eight stops hit on one
+day (Oct 15, small-cap Telecom and Capital Goods) while the index rose. Four
+patterns in those trades looked like rule flaws:
+
+- **A.** 15 of 25 orders had their stop at the 8% cap, i.e. 2xATR was wider
+  than 8% — a stop inside two ordinary days' movement.
+- **B.** All four adds bought on Oct 13 were stopped out two days later; two
+  were added when the first lot was only ~+0.4R in profit.
+- **C.** CPPLUS was bought back the day after a stop-out; HFCL re-qualified
+  the same day it was sold.
+- **D.** 24 of 25 orders were small caps, and they fell together.
+
+**Results** — 2017-10-23 to 2026-10-16, 499 stocks, Trend Template entry +
+trailing exit (`backtest/run_portfolio_backtest.py`, GitHub Actions run
+39018047188; options in `BacktestConfig`, defaults = live):
+
+| Variant | Trades | Win % | Avg R | CAGR | CAGR last 3y | Max DD | Sharpe | Calmar |
+|---|---|---|---|---|---|---|---|---|
+| **Live rules** | 2,298 | 35.8 | +0.18 | **+12.5%** | +3.5% | -26.0% | 1.09 | 0.48 |
+| Old rules (2/sector, max 8, no adds) | 1,098 | 36.2 | +0.24 | +12.2% | +5.1% | -25.4% | 1.13 | 0.48 |
+| A1 Stop = full 2xATR, fewer shares | 2,242 | 37.5 | +0.17 | +11.9% | +4.0% | -25.9% | 1.07 | 0.46 |
+| A2 Skip stocks with 2xATR > 8% | 1,595 | 37.6 | +0.15 | +9.0% | +0.9% | -21.7% | 0.94 | 0.41 |
+| B1 Adds only when first lot >= +1R | 2,102 | 35.6 | +0.20 | +12.3% | +2.8% | -24.2% | 1.11 | 0.51 |
+| B2 No adds | 1,675 | 36.6 | +0.19 | +11.8% | +2.2% | -19.8% | 1.13 | 0.59 |
+| C Wait 10 sessions after a loss | 2,180 | 35.9 | +0.15 | +10.8% | +3.4% | -30.5% | 0.96 | 0.35 |
+| D1 Small-cap risk <= 4% of capital | 2,269 | 35.0 | +0.18 | +12.4% | +3.3% | -21.8% | 1.13 | 0.57 |
+| D2 Half risk when market regime is down | 2,531 | 36.2 | +0.22 | +11.4% | +3.3% | -21.8% | 1.18 | 0.52 |
+| A1+B1+C | 1,954 | 37.4 | +0.16 | +10.4% | +2.9% | -26.0% | 1.01 | 0.40 |
+| A1+B1+C+D1+D2 | 2,067 | 38.7 | +0.20 | +9.6% | +3.6% | -20.4% | 1.11 | 0.47 |
+| B1+D1 | 2,103 | 35.9 | +0.20 | +12.2% | +3.3% | -25.5% | 1.10 | 0.48 |
+| B1+D1+D2 | 2,262 | 36.5 | +0.22 | +10.6% | +3.5% | -19.2% | 1.14 | 0.55 |
+| *Nifty500 buy & hold* | | | | +10.7% | +8.6% | -38.3% | 0.71 | 0.28 |
+
+The live rules' own trades, split by the same conditions:
+
+| Group | Trades | Win % | Avg R |
+|---|---|---|---|
+| Stop at the 8% cap | 1,161 | 35.4 | **+0.26** |
+| Stop = 2xATR (under 8%) | 1,137 | 36.1 | +0.10 |
+| Bought within 10 sessions of a loss in the same stock | 299 | 32.8 | **+0.32** |
+| Other buys | 1,999 | 36.2 | +0.16 |
+| Adds, first lot < +1R | 355 | 35.2 | +0.06 |
+| Adds, first lot >= +1R | 482 | 36.7 | +0.23 |
+| Small caps | 1,075 | 34.6 | +0.17 |
+| Mid + large caps | 1,223 | 36.8 | +0.19 |
+
+Return by calendar year (%; 2017 from Oct 23, 2026 to Oct 16):
+
+| Year | Live | Old rules | Nifty500 |
+|---|---|---|---|
+| 2017 | -6.0 | -2.7 | +5.8 |
+| 2018 | -11.8 | -9.1 | -3.4 |
+| 2019 | +4.1 | +2.0 | +7.7 |
+| 2020 | +41.7 | +39.8 | +16.7 |
+| 2021 | +61.4 | +53.2 | +30.2 |
+| 2022 | +11.2 | +9.5 | +3.0 |
+| 2023 | +21.7 | +20.0 | +25.8 |
+| 2024 | +6.1 | +8.8 | +15.2 |
+| 2025 | -2.6 | +0.2 | +6.7 |
+| 2026 | +4.0 | +1.7 | -6.7 |
+
+**Honest reading.**
+
+- **A and C are wrong diagnoses.** Trades whose stop sat at the 8% cap earned
+  more per unit of risk (+0.26R vs +0.10R): the cap makes R small on the most
+  volatile, fastest-moving names, so their winners count for more R. Buying a
+  stock back soon after a loss also did better than average (+0.32R) — a
+  leader that shakes out and re-qualifies is often still a leader. Removing
+  either lowers CAGR.
+- **B and D cut drawdown, not return, and not reliably.** D1 alone takes max
+  DD from -26.0% to -21.8% for 0.1pp of CAGR, but B1+D1 is back at -25.5%:
+  max drawdown is one path-dependent number and moves several points on small
+  rule changes (§17 saw 8pp between two fetches of the same data). Adds below
+  +1R do earn less (+0.06R vs +0.23R), but filtering them barely moves CAGR.
+- **No change is clearly better than the live rules, so none is adopted.** The
+  two weeks of losses came from the market (a small-cap sell-off in the two
+  sectors the book was in), not from a rule that 9 years of data says is broken.
+- **The bigger finding is the year table.** The strategy beat the index in
+  2020-2022 and 2026 and lagged it in the other six years, including 2023-2025.
+  Most of its 9-year edge comes from the 2020-21 small/mid-cap momentum run.
+  Over the last 3 years it made +3.5% a year against the index's +8.6%. With
+  §9's survivorship bias on top, the honest expectation is: it outperforms in
+  broad momentum markets and lags the index in large-cap-led or choppy ones.
+- **Idle cash is untested.** The book averages ~50% in cash, which earns
+  nothing in the backtest or the paper account. A liquid fund on that cash is
+  the next thing worth measuring.
