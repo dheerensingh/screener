@@ -19,9 +19,15 @@ module is the actual paper account. Each daily run (from main.py):
      for the allocator.
   4. Snapshot — one row per market date in paper_equity.csv for the dashboard.
 
+Idle cash is assumed to sit in a liquid fund (STRATEGY.md §19): each run credits
+modules/cash_yield.py's rate on the previous snapshot's cash, for the calendar
+days since it. The running total is the `cash_income` column of paper_equity.csv
+(credited from 2026-10-19 on, not back-dated).
+
 All state lives in two committed CSVs: paper_trades.csv (one row per order, its
 whole lifecycle) and paper_equity.csv (daily snapshots). Cash is re-derived from
-the ledger every run rather than stored, so the two files can't drift apart.
+the ledger every run (plus the liquid-fund income above) rather than stored, so
+the two files can't drift apart.
 
 Costs: COST_PCT_PER_SIDE on every buy and sell. Deliberately higher than the
 backtest's 0.1% round trip — Indian delivery trades pay 0.1% STT on *each* side
@@ -38,6 +44,7 @@ from typing import Optional
 
 import pandas as pd
 
+from .cash_yield import interest as cash_interest
 from .portfolio_allocator import Holding
 from .stock_fetcher import fetch_stock_data
 from .technical_analyzer import _rsi, atr as compute_atr
@@ -67,7 +74,7 @@ LEDGER_FIELDS = [
 ]
 EQUITY_FIELDS = [
     "date", "equity", "cash", "market_value", "realized_pnl", "unrealized_pnl",
-    "open_positions", "pending_orders", "benchmark_close",
+    "open_positions", "pending_orders", "benchmark_close", "cash_income",
 ]
 
 
@@ -104,6 +111,7 @@ class PaperState:
     closed_today: list[dict] = field(default_factory=list)
     cancelled_today: list[dict] = field(default_factory=list)
     booked_today: list[dict] = field(default_factory=list)
+    cash_income: float = 0.0  # liquid-fund income credited so far (included in cash)
 
     @property
     def market_value(self) -> float:
@@ -237,6 +245,20 @@ class PaperTrader:
         self.closed_today: list[dict] = []
         self.cancelled_today: list[dict] = []
         self.booked_today: list[dict] = []
+        self.cash_income = 0.0
+
+    def _cash(self) -> float:
+        return _derive_cash(self.ledger, self.start_capital) + self.cash_income
+
+    def _accrue_cash_income(self) -> None:
+        """Liquid-fund income on the last snapshot before as_of — so re-running a session never double-credits."""
+        prev = [h for h in self.equity_history if self.as_of and h["date"] < self.as_of]
+        if not prev:
+            return
+        last = prev[-1]
+        self.cash_income = float(last.get("cash_income") or 0.0) + cash_interest(
+            float(last["cash"]), pd.Timestamp(last["date"]).date(), pd.Timestamp(self.as_of).date(),
+        )
 
     def _ensure_data(self, price_data: dict[str, pd.DataFrame]) -> None:
         self.data = dict(price_data)
@@ -253,7 +275,8 @@ class PaperTrader:
         # The most common last bar across all stocks — robust to one stale ticker.
         self.as_of = last_dates.mode().iloc[0].strftime("%Y-%m-%d") if len(last_dates) else None
 
-        cash = _derive_cash(self.ledger, self.start_capital)
+        self._accrue_cash_income()
+        cash = self._cash()
         for row in self.ledger:
             if row["status"] != PENDING:
                 continue
@@ -381,7 +404,7 @@ class PaperTrader:
             self.booked_today.append(row)
 
     def snapshot(self, benchmark_close: float) -> None:
-        cash = _derive_cash(self.ledger, self.start_capital)
+        cash = self._cash()
         market_value = sum(p.market_value for p in self.positions)
         realized = sum(float(r["pnl"]) for r in self.ledger if r["status"] == CLOSED)
         row = {
@@ -390,7 +413,7 @@ class PaperTrader:
             "unrealized_pnl": f"{sum(p.unrealized_pnl for p in self.positions):.2f}",
             "open_positions": str(len(self.positions)),
             "pending_orders": str(sum(1 for r in self.ledger if r["status"] == PENDING)),
-            "benchmark_close": f"{benchmark_close:.2f}",
+            "benchmark_close": f"{benchmark_close:.2f}", "cash_income": f"{self.cash_income:.2f}",
         }
         self.equity_history = [h for h in self.equity_history if h["date"] != self.as_of] + [row]
         self.equity_history.sort(key=lambda h: h["date"])
@@ -402,7 +425,7 @@ class PaperTrader:
     def state(self) -> PaperState:
         return PaperState(
             as_of=self.as_of or "", start_capital=self.start_capital,
-            cash=_derive_cash(self.ledger, self.start_capital), positions=self.positions,
+            cash=self._cash(), cash_income=self.cash_income, positions=self.positions,
             ledger=self.ledger, equity_history=self.equity_history,
             filled_today=self.filled_today, closed_today=self.closed_today,
             cancelled_today=self.cancelled_today, booked_today=self.booked_today,
