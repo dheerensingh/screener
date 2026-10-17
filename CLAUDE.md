@@ -447,3 +447,22 @@ unchanged). `Trade` records `stop_capped`, `reentry_after_loss` and `add_open_r`
 trade split and a calendar-year return table. No live rule changed. Also fixed: the
 simulator's allocation loop reused `i`, the day index the drawdown circuit breaker
 reads (only matters with `apply_drawdown_circuit_breaker=True`).
+
+## Task 12 (2026-10-17): idle cash in a liquid fund; gold slice tested
+
+**STRATEGY.md §19 is the canonical reference.** Module map only:
+
+- **`modules/cash_yield.py`** — approximate yearly Indian liquid-fund yields
+  (`LIQUID_FUND_YIELD_PCT`, hand-edited — not a data feed) and `interest()`.
+- **`paper_trader.py`** — idle cash earns that yield from 2026-10-19 on: each run
+  credits it on the last earlier snapshot's cash (`_accrue_cash_income`, so a
+  re-run never double-credits); the running total is `paper_equity.csv`'s
+  `cash_income` column and is part of `cash`. Dashboard cash tile shows it.
+- **`backtest/simulator.py`** — `BacktestConfig.idle_cash_yield`, `gold_weight_pct`,
+  `gold_trend` ("always" / "sma200" / "12m"); `run_backtest(gold=...)`. Gold is
+  marked into `cash` daily, rebalanced monthly, and counts toward the capital cap.
+- **`backtest/data_cache.py`** — `fetch_gold()` (GOLDBEES.NS, cached, cleaned by
+  `_clean_gold`: Yahoo had two bars at 1/100 price in Dec 2019) and
+  `fetch_gold_reference()` (COMEX gold × USD/INR, a cross-check only).
+- **`run_portfolio_backtest.py --suite cash_gold`** (default) runs §19;
+  `--suite fixes` re-runs §18.

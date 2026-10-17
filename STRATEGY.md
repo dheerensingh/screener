@@ -1035,3 +1035,86 @@ Return by calendar year (%; 2017 from Oct 23, 2026 to Oct 16):
 - **Idle cash is untested.** The book averages ~50% in cash, which earns
   nothing in the backtest or the paper account. A liquid fund on that cash is
   the next thing worth measuring.
+
+## 19. Idle cash in a liquid fund, and a gold slice (2026-10-17)
+
+**Why.** §18's year table showed the book averages ~50% cash, and that cash
+earned nothing in the backtest or the paper account. The user also asked to
+test holding a share of gold, with a long-term momentum rule.
+
+**Rules tested** (`BacktestConfig.idle_cash_yield`, `gold_weight_pct`,
+`gold_trend`; the yield table is `modules/cash_yield.py`):
+
+- **Liquid fund.** Cash not in stocks or gold earns an approximate yearly
+  Indian liquid-fund return (3.3% in 2021 to 7.2% in 2018/2024), credited for
+  calendar days held. Before tax: since April 2023 debt-fund gains are taxed at
+  the slab rate, so the after-tax gain is roughly a quarter to a third smaller.
+- **Gold.** GOLDBEES.NS held at a fixed % of equity, rebalanced on the first
+  session of each month at the close (signal from the previous close). With a
+  trend rule it is held only while gold is above its 200-day SMA, or up over 12
+  months, and sold the day the rule turns off. Gold counts toward the 85%
+  capital cap, so it leaves less room for stocks. Costs 0.05% per side.
+- **Data.** Yahoo's GOLDBEES series had two bars at 1/100 of the real price
+  (2019-12-19/20, giving a fake -99% drawdown); `data_cache._clean_gold` fixes
+  such bars and lists them in the run summary. The yearly returns were checked
+  against COMEX gold × USD/INR and agree within a few points, except 2024
+  (+19% vs +33%: India cut its gold import duty in July 2024, lowering
+  domestic prices).
+
+**Results** — 2017-10-23 to 2026-10-16, live rules otherwise (GitHub Actions
+run 39019468815):
+
+| Variant | Trades | Avg stocks held | CAGR | CAGR last 3y | Max DD | Sharpe | Calmar |
+|---|---|---|---|---|---|---|---|
+| Live rules, idle cash earns nothing | 2,298 | 9.5 | +12.5% | +3.5% | -26.0% | 1.09 | 0.48 |
+| **+ liquid fund on idle cash (live from 2026-10-19)** | 2,298 | 9.5 | **+15.5%** | +8.6% | -23.1% | 1.38 | 0.67 |
+| + liquid + gold 10%, always | 2,053 | 8.8 | **+16.1%** | +12.4% | **-16.0%** | **1.59** | **1.00** |
+| + liquid + gold 10% above 200-DMA | 2,151 | 9.0 | +15.4% | +10.7% | -19.0% | 1.48 | 0.81 |
+| + liquid + gold 20%, always | 1,817 | 7.9 | +14.5% | +12.5% | -14.4% | 1.54 | 1.01 |
+| + liquid + gold 20% above 200-DMA | 1,868 | 8.1 | +15.6% | +12.3% | -17.6% | 1.50 | 0.89 |
+| + liquid + gold 20% up over 12 months | 1,855 | 8.0 | +14.9% | +12.7% | -17.0% | 1.46 | 0.87 |
+| + liquid + gold 30% above 200-DMA | 1,497 | 6.5 | +15.1% | +13.4% | -17.5% | 1.46 | 0.86 |
+| *Nifty500 buy & hold* | | | +10.7% | +8.6% | -38.3% | 0.71 | 0.28 |
+| *Gold buy & hold* | | | +18.3% | +33.6% | -24.4% | 1.12 | 0.75 |
+
+Return by calendar year (%):
+
+| Year | Live, cash idle | + liquid | + liquid + gold 20% >200-DMA | Gold | Nifty500 |
+|---|---|---|---|---|---|
+| 2017 | -6.0 | -5.7 | -5.7 | -1.1 | +5.8 |
+| 2018 | -11.8 | -9.5 | -9.6 | +6.7 | -3.4 |
+| 2019 | +4.1 | +5.5 | +11.0 | +23.1 | +7.7 |
+| 2020 | +41.9 | +41.9 | +36.8 | +27.0 | +16.7 |
+| 2021 | +61.3 | +61.4 | +62.9 | -5.2 | +30.2 |
+| 2022 | +11.2 | +14.1 | +7.8 | +12.8 | +3.0 |
+| 2023 | +21.7 | +25.6 | +14.3 | +14.7 | +25.8 |
+| 2024 | +6.1 | +11.6 | +12.3 | +19.4 | +15.2 |
+| 2025 | -2.6 | +3.0 | +16.9 | +71.8 | +6.7 |
+| 2026 | +4.0 | +7.1 | +7.5 | +8.8 | -6.7 |
+
+**Honest reading.**
+
+- **The liquid fund is a plain improvement** (+3.0pp CAGR, same trades): it
+  is money the account already has, earning what any idle balance can. Adopted
+  in the paper account from 2026-10-19 (not back-dated) — `paper_trader.py`
+  credits it on each snapshot's cash; `cash_income` in `paper_equity.csv`.
+  In real trading this means parking cash in a liquid fund or liquid ETF and
+  redeeming before buys (liquid funds pay out T+1).
+- **Gold's return here is mostly one exceptional period.** Gold made +18.3% a
+  year in rupees over these 9 years, including +72% in 2025; its long-run
+  rupee return is closer to 10-11%. Don't read the gold rows' CAGR as
+  repeatable.
+- **Gold's diversification is the durable part.** It rose when the strategy
+  lost (2018: +6.7% vs -11.8%; 2019, 2024, 2025) and was flat when the strategy
+  boomed (2021). That is why even 10-20% gold roughly halves max drawdown
+  (-23% → -14% to -16%) and lifts Sharpe from 1.38 to ~1.5 — a benefit that
+  doesn't need gold to keep rising 18% a year.
+- **The trend rule didn't help gold.** "Always held" beat "above the 200-DMA"
+  at 10% (16.1% / -16.0% vs 15.4% / -19.0%) and matched it at 20%. Selling gold
+  on dips below its average mostly missed rebounds in a long bull market. A
+  plain fixed share, rebalanced monthly, is simpler and did as well or better.
+- **Gold costs stock exposure.** It counts against the 85% capital cap, so the
+  book holds fewer stocks (9.5 → 7.9 at 20%) and the strategy's own trades
+  contribute less.
+- **Gold is not yet in the paper account** — the liquid fund is; gold waits on
+  the user's choice of share.
