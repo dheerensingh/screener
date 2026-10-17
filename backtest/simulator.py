@@ -73,6 +73,7 @@ LOOKBACK_WEIGHTS = {"1M": 0.5, "3M": 0.3, "6M": 0.2}
 
 EntryParadigm = Literal["trend_template", "rsi_macd_only", "vcp_breakout"]
 ExitParadigm = Literal["trailing", "fixed_target", "scale_out"]
+StopRule = Literal["cap", "atr", "skip_wide"]
 
 
 @dataclass
@@ -97,6 +98,12 @@ class BacktestConfig:
     risk_scale: float = RISK_SCALE       # multiplies every cap-band risk %
     max_portfolio_heat_pct: float = MAX_PORTFOLIO_HEAT_PCT
     max_deployed_capital_pct: float = MAX_DEPLOYED_CAPITAL_PCT
+    # Fixes tested after the first two weeks of paper trading (STRATEGY.md §18). Defaults = live.
+    stop_rule: StopRule = "cap"          # "cap": min(2xATR, 8%) | "atr": full 2xATR, fewer shares | "skip_wide": skip if 2xATR > 8%
+    add_min_open_r: float = 0.0          # add only when the first lot is at least this many R in profit (0 = above last buy only)
+    reentry_cooldown_days: int = 0       # sessions a stock is barred after a losing exit
+    max_small_cap_heat_pct: Optional[float] = None  # cap on the risk carried by small caps, % of capital
+    regime_down_risk_scale: float = 1.0  # risk multiplier for entries decided while the market regime is down
 
 
 @dataclass
@@ -114,6 +121,9 @@ class Trade:
     pnl_rupees: float = 0.0
     r_multiple: float = 0.0  # pnl / initial risk
     is_add: bool = False     # bought as an add to a stock already held
+    stop_capped: bool = False         # 2xATR was wider than the 8% cap
+    reentry_after_loss: bool = False  # bought within 10 sessions of a losing exit in the same stock
+    add_open_r: float = float("nan")  # for an add: the first lot's open profit in R when the add was decided
 
 
 @dataclass
@@ -130,6 +140,9 @@ class OpenPosition:
     risk_amount: float
     scaled_out: bool = False
     is_add: bool = False
+    stop_capped: bool = False
+    reentry_after_loss: bool = False
+    add_open_r: float = float("nan")
 
 
 def _per_ticker_signals(ticker: str, df: pd.DataFrame) -> Optional[pd.DataFrame]:
@@ -300,8 +313,10 @@ def run_backtest(
     closed_trades: list[Trade] = []
     equity_curve: list[tuple[pd.Timestamp, float]] = []
     cash = config.account_size
-    # (ticker, sector, add risk fraction or None for a new name) decided on day T, entered T+1
-    pending_entries: list[tuple[str, str, Optional[float]]] = []
+    # (ticker, sector, add risk fraction or None for a new name, first lot's open R for an add) decided on day T, entered T+1
+    pending_entries: list[tuple[str, str, Optional[float], float]] = []
+    pending_risk_mult = 1.0  # config.regime_down_risk_scale when the entries were decided in a down regime
+    last_loss_exit: dict[str, int] = {}  # ticker -> trading_days index of its latest losing exit
     lot_seq = 0  # open_positions is keyed by lot ("TICKER#n"): an add to a winner is its own lot
     equity_peak = config.account_size
     entries_halted = False  # strategy-level drawdown circuit breaker state
@@ -314,9 +329,12 @@ def run_backtest(
                 p.quantity * signals[p.ticker]["close"].get(day, p.entry_price) for p in open_positions.values()
             ) / config.account_size * 100.0
             heat_pct = sum(p.risk_amount for p in open_positions.values()) / config.account_size * 100.0
+            small_heat_pct = sum(
+                p.risk_amount for p in open_positions.values() if p.cap_band == "Small"
+            ) / config.account_size * 100.0
             held_now = {p.ticker for p in open_positions.values()}
 
-            for ticker, sector, add_fraction in pending_entries:
+            for ticker, sector, add_fraction, add_open_r in pending_entries:
                 is_add = add_fraction is not None
                 if is_add != (ticker in held_now):
                     continue  # a new name got bought already, or the winner was sold before the add filled
@@ -334,7 +352,7 @@ def run_backtest(
                     continue
 
                 cap_band = cap_band_by_ticker.get(ticker, "Mid")
-                risk_pct = CAP_BAND_RISK_PCT.get(cap_band, CAP_BAND_RISK_PCT_DEFAULT) * config.risk_scale
+                risk_pct = CAP_BAND_RISK_PCT.get(cap_band, CAP_BAND_RISK_PCT_DEFAULT) * config.risk_scale * pending_risk_mult
                 max_position_pct = DEFAULT_MAX_POSITION_PCT
                 if is_add:
                     risk_pct *= add_fraction
@@ -347,10 +365,14 @@ def run_backtest(
                 remaining_heat_pct = config.max_portfolio_heat_pct - heat_pct
                 if remaining_capital_pct <= 0 or remaining_heat_pct <= 0 or risk_pct > remaining_heat_pct:
                     continue
+                if (cap_band == "Small" and config.max_small_cap_heat_pct is not None
+                        and small_heat_pct + risk_pct > config.max_small_cap_heat_pct):
+                    continue
 
                 atr_stop_dist = ATR_STOP_MULTIPLIER * atr_val
                 max_stop_dist = entry_price * MAX_STOP_PCT / 100.0
-                stop_dist = min(atr_stop_dist, max_stop_dist)
+                stop_capped = atr_stop_dist > max_stop_dist
+                stop_dist = atr_stop_dist if config.stop_rule == "atr" else min(atr_stop_dist, max_stop_dist)
                 if config.entry_paradigm == "vcp_breakout":
                     # A valid base's own low is often tighter than the generic ATR/%
                     # caps — that's the whole point of VCP-derived stops (see plan).
@@ -373,11 +395,15 @@ def run_backtest(
                     ticker=ticker, sector=sector, cap_band=cap_band, entry_date=day,
                     entry_price=entry_price, quantity=qty, initial_risk_per_share=stop_dist,
                     stop=entry_price - stop_dist, highest_close=entry_price, risk_amount=risk_amount,
-                    is_add=is_add,
+                    is_add=is_add, stop_capped=stop_capped,
+                    reentry_after_loss=ticker in last_loss_exit and i - last_loss_exit[ticker] <= 10,
+                    add_open_r=add_open_r,
                 )
                 held_now.add(ticker)
                 deployed_pct += (qty * entry_price) / config.account_size * 100.0
                 heat_pct += risk_pct
+                if cap_band == "Small":
+                    small_heat_pct += risk_pct
 
         pending_entries = []
 
@@ -421,8 +447,11 @@ def run_backtest(
                     initial_stop=pos.entry_price - pos.initial_risk_per_share,
                     exit_date=day, exit_price=exit_price, exit_reason=exit_reason,
                     pnl_rupees=pnl, r_multiple=pnl / pos.risk_amount if pos.risk_amount else 0.0,
-                    is_add=pos.is_add,
+                    is_add=pos.is_add, stop_capped=pos.stop_capped,
+                    reentry_after_loss=pos.reentry_after_loss, add_open_r=pos.add_open_r,
                 ))
+                if pnl < 0:
+                    last_loss_exit[ticker] = i
                 cash += pnl
                 del open_positions[lot_id]
                 continue
@@ -448,14 +477,15 @@ def run_backtest(
         #    docstring: a plain price>SMA check missed a real 5-month chop
         #    where price stayed above a barely-rising 200-SMA) ────────────────
         in_uptrend = True
-        if config.apply_market_regime_filter and day in benchmark_sma200.index:
+        if (config.apply_market_regime_filter or config.regime_down_risk_scale != 1.0) and day in benchmark_sma200.index:
             sma_today = benchmark_sma200.get(day)
             roc_today = benchmark_sma200_roc.get(day)
             if sma_today == sma_today and roc_today == roc_today:  # neither NaN
                 in_uptrend = (benchmark.loc[day] > sma_today) and (roc_today >= REGIME_MIN_SMA_ROC_PCT)
 
         # ── 4. Decide today's leading sectors + candidate entries (executed T+1) ──
-        if in_uptrend and not entries_halted:
+        pending_risk_mult = 1.0 if in_uptrend else config.regime_down_risk_scale
+        if (in_uptrend or not config.apply_market_regime_filter) and not entries_halted:
             today_sector_scores = {}
             for sector, rets in sector_ret.items():
                 rs = {}
@@ -476,10 +506,15 @@ def run_backtest(
                 for ticker in sector_members.get(sector, []):
                     if ticker in holdings and not config.allow_pyramiding:
                         continue
+                    if (config.reentry_cooldown_days and ticker in last_loss_exit
+                            and i - last_loss_exit[ticker] < config.reentry_cooldown_days):
+                        continue
                     sig = signals[ticker]
                     if day not in sig.index:
                         continue
                     row = sig.loc[day]
+                    if config.stop_rule == "skip_wide" and ATR_STOP_MULTIPLIER * row["atr"] > row["close"] * MAX_STOP_PCT / 100.0:
+                        continue
                     if config.apply_liquidity_filter:
                         adv = row["avg_dollar_vol"]
                         if adv != adv or adv < MIN_AVG_DAILY_VALUE_INR:
@@ -521,30 +556,35 @@ def run_backtest(
             held_in_sector: dict[str, int] = {}
             for h in holdings.values():
                 held_in_sector[h.sector] = held_in_sector.get(h.sector, 0) + 1
-            per_sector_picks: list[list[tuple[str, str, Optional[float]]]] = []
+            per_sector_picks: list[list[tuple[str, str, Optional[float], float]]] = []
             for sector in leading:
                 free = max(0, slots.get(sector, 0) - held_in_sector.get(sector, 0))
                 picks = []
                 for t, _ in candidates_by_sector.get(sector, []):
                     h = holdings.get(t)
                     if h is not None:
-                        if add_blocker(h, float(signals[t].loc[day, "close"])) is None:
-                            picks.append((t, sector, add_risk_fraction(h)))
+                        close_t = float(signals[t].loc[day, "close"])
+                        if add_blocker(h, close_t) is None:
+                            first = min((p for p in open_positions.values() if p.ticker == t),
+                                        key=lambda p: p.entry_date)
+                            open_r = (close_t - first.entry_price) / first.initial_risk_per_share
+                            if open_r >= config.add_min_open_r:
+                                picks.append((t, sector, add_risk_fraction(h), open_r))
                     elif free > 0:
-                        picks.append((t, sector, None))
+                        picks.append((t, sector, None, float("nan")))
                         free -= 1
                 per_sector_picks.append(picks)
             rounds = max((len(p) for p in per_sector_picks), default=0)
             new_names = len(holdings)
-            for i in range(rounds):
+            for rnd in range(rounds):
                 for picks in per_sector_picks:
-                    if i >= len(picks):
+                    if rnd >= len(picks):
                         continue
-                    if picks[i][2] is None:
+                    if picks[rnd][2] is None:
                         if new_names >= config.max_total_positions:
                             continue
                         new_names += 1
-                    pending_entries.append(picks[i])
+                    pending_entries.append(picks[rnd])
 
         # `cash` here is starting capital + realized P&L (buys are never deducted from
         # it), so open positions add only their unrealized P&L. Until 2026-10-07 this

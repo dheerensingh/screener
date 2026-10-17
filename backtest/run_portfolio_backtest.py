@@ -1,13 +1,15 @@
 """
-Backtest: portfolio-shape comparison (STRATEGY.md §17)
+Backtest: rule-change comparison (STRATEGY.md §17, §18)
 
     python -m backtest.run_portfolio_backtest [--period 10y] [--force-refetch]
 
-Runs the live configuration (Trend Template entry, trailing exit) under the
-old portfolio rules (2 stocks per leading sector, 8 max, no adds) and the new
-ones (15 stocks, sector slots weighted by relative strength, adds to winners)
-at a few risk levels, and prints one comparison table next to Nifty500 buy &
-hold. Also written to $GITHUB_STEP_SUMMARY when run in GitHub Actions.
+Runs the live configuration (Trend Template entry, trailing exit) next to
+variants that each change one rule, plus combinations, and prints one
+comparison table next to Nifty500 buy & hold. §18's variants test the fixes
+suggested by the first two weeks of paper trading: the 8% stop cap, adds to
+winners, buying back a stock right after a loss, small-cap concentration and
+sizing in a down market. A second table splits the live rules' own trades by
+those same conditions. Both are written to $GITHUB_STEP_SUMMARY in Actions.
 """
 
 import argparse
@@ -30,15 +32,22 @@ logger = logging.getLogger("backtest.portfolio")
 
 BASE = BacktestConfig(entry_paradigm="trend_template", exit_paradigm="trailing")  # = live settings
 OLD = replace(BASE, weighted_sector_slots=False, max_total_positions=8, allow_pyramiding=False, risk_scale=1.0)
+FIX_A = dict(stop_rule="atr")
+FIX_B = dict(add_min_open_r=1.0)
+FIX_C = dict(reentry_cooldown_days=10)
+FIX_D = dict(max_small_cap_heat_pct=4.0, regime_down_risk_scale=0.5)
 VARIANTS = [
+    ("Live rules", BASE),
     ("Old: 2/sector, max 8, no adds", OLD),
-    ("Old, market filter ON", replace(OLD, apply_market_regime_filter=True)),
-    ("15 weighted, no adds", replace(BASE, allow_pyramiding=False, risk_scale=1.0)),
-    ("15 weighted + adds", replace(BASE, risk_scale=1.0)),
-    ("15 weighted + adds, risk x0.75 (live)", BASE),
-    ("15 weighted + adds, risk x0.6", replace(BASE, risk_scale=0.6)),
-    ("15 weighted, no adds, risk x0.75", replace(BASE, allow_pyramiding=False)),
-    ("Live, market filter ON", replace(BASE, apply_market_regime_filter=True)),
+    ("A1 Stop = full 2xATR (fewer shares)", replace(BASE, **FIX_A)),
+    ("A2 Skip stocks with 2xATR > 8%", replace(BASE, stop_rule="skip_wide")),
+    ("B1 Adds only at first lot >= +1R", replace(BASE, **FIX_B)),
+    ("B2 No adds", replace(BASE, allow_pyramiding=False)),
+    ("C Wait 10 sessions after a loss", replace(BASE, **FIX_C)),
+    ("D1 Small-cap risk <= 4%", replace(BASE, max_small_cap_heat_pct=4.0)),
+    ("D2 Half risk when market is down", replace(BASE, regime_down_risk_scale=0.5)),
+    ("A1+B1+C", replace(BASE, **FIX_A, **FIX_B, **FIX_C)),
+    ("A1+B1+C+D1+D2", replace(BASE, **FIX_A, **FIX_B, **FIX_C, **FIX_D)),
 ]
 
 
@@ -54,6 +63,40 @@ def _avg_names_held(trades, equity: pd.Series) -> float:
     return float(held.mean())
 
 
+def _cagr_since(equity: pd.Series, years: float) -> float:
+    start = equity.index[-1] - pd.DateOffset(years=years)
+    return _cagr(equity[equity.index >= start])
+
+
+def _group(name: str, trades) -> str:
+    if not trades:
+        return f"| {name} | 0 | | | |"
+    wins = sum(t.pnl_rupees > 0 for t in trades)
+    avg_r = sum(t.r_multiple for t in trades) / len(trades)
+    pnl = sum(t.pnl_rupees for t in trades)
+    return f"| {name} | {len(trades)} | {wins / len(trades) * 100:.1f} | {avg_r:+.2f} | {pnl:+,.0f} |"
+
+
+def _breakdown(trades) -> list[str]:
+    """The live rules' trades split by the conditions §18's fixes target."""
+    first = [t for t in trades if not t.is_add]
+    adds = [t for t in trades if t.is_add]
+    return [
+        "", "#### Live rules: trades split by condition", "",
+        "| Group | Trades | Win % | Avg R | P&L ₹ |", "|---|---|---|---|---|",
+        _group("All trades", trades),
+        _group("Stop at the 8% cap (2xATR wider)", [t for t in trades if t.stop_capped]),
+        _group("Stop = 2xATR (under 8%)", [t for t in trades if not t.stop_capped]),
+        _group("Bought within 10 sessions of a loss in the same stock", [t for t in trades if t.reentry_after_loss]),
+        _group("Other buys", [t for t in trades if not t.reentry_after_loss]),
+        _group("First buys", first),
+        _group("Adds, first lot < +1R", [t for t in adds if t.add_open_r < 1.0]),
+        _group("Adds, first lot >= +1R", [t for t in adds if t.add_open_r >= 1.0]),
+        _group("Small caps", [t for t in trades if t.cap_band == "Small"]),
+        _group("Mid + large caps", [t for t in trades if t.cap_band != "Small"]),
+    ]
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--period", default="10y")
@@ -67,6 +110,7 @@ def main() -> int:
 
     rows = []
     window = None
+    breakdown: list[str] = []
     for name, cfg in VARIANTS:
         logger.info("Running: %s", name)
         trades, equity = run_backtest(universe_data, benchmark, sector_by_ticker, cap_band_by_ticker, cfg)
@@ -74,25 +118,32 @@ def main() -> int:
         window = window or (equity.index[0], equity.index[-1])
         adds = [t for t in trades if t.is_add]
         add_win = (sum(t.pnl_rupees > 0 for t in adds) / len(adds) * 100.0) if adds else float("nan")
-        rows.append((name, m.total_trades, len(adds), m.win_rate_pct, add_win, _avg_names_held(trades, equity),
-                     m.cagr_pct, m.max_drawdown_pct, m.sharpe_ratio,
+        avg_r = sum(t.r_multiple for t in trades) / len(trades) if trades else 0.0
+        rows.append((name, m.total_trades, len(adds), m.win_rate_pct, add_win, avg_r, _avg_names_held(trades, equity),
+                     m.cagr_pct, _cagr_since(equity, 3), m.max_drawdown_pct, m.sharpe_ratio,
                      m.cagr_pct / abs(m.max_drawdown_pct) if m.max_drawdown_pct else 0.0))
+        if cfg is BASE:
+            breakdown = _breakdown(trades)
 
     bench = benchmark.dropna()
     bench = bench[(bench.index >= window[0]) & (bench.index <= window[1])]
     bh_cagr, bh_dd, bh_sharpe = _cagr(bench), _max_drawdown(bench), _sharpe(bench)
+    bh_cagr3 = _cagr_since(bench, 3)
 
     lines = [
         f"### Portfolio rules backtest — {window[0]:%Y-%m-%d} to {window[1]:%Y-%m-%d}, "
         f"{len(universe_data)} stocks, Trend Template + trailing exit",
         "",
-        "| Variant | Trades | Adds | Win % | Add win % | Avg stocks held | CAGR % | Max DD % | Sharpe | Calmar |",
-        "|---|---|---|---|---|---|---|---|---|---|",
+        "| Variant | Trades | Adds | Win % | Add win % | Avg R | Avg stocks held | CAGR % | CAGR last 3y % "
+        "| Max DD % | Sharpe | Calmar |",
+        "|---|---|---|---|---|---|---|---|---|---|---|---|",
     ]
     for r in rows:
-        lines.append("| {} | {} | {} | {:.1f} | {:.1f} | {:.1f} | {:+.1f} | {:.1f} | {:.2f} | {:.2f} |".format(*r))
-    lines.append(f"| *Nifty500 buy & hold* | | | | | | {bh_cagr:+.1f} | {bh_dd:.1f} | {bh_sharpe:.2f} | "
+        lines.append("| {} | {} | {} | {:.1f} | {:.1f} | {:+.2f} | {:.1f} | {:+.1f} | {:+.1f} | {:.1f} | {:.2f} | {:.2f} |"
+                     .format(*r))
+    lines.append(f"| *Nifty500 buy & hold* | | | | | | | {bh_cagr:+.1f} | {bh_cagr3:+.1f} | {bh_dd:.1f} | {bh_sharpe:.2f} | "
                  f"{bh_cagr / abs(bh_dd) if bh_dd else 0:.2f} |")
+    lines += breakdown
     text = "\n".join(lines)
     print(text)
     summary = os.environ.get("GITHUB_STEP_SUMMARY")
