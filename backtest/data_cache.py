@@ -29,19 +29,54 @@ GOLD_TICKER = "GOLDBEES.NS"  # Nippon India Gold BeES, the oldest and most trade
 GOLD_CACHE_PATH = os.path.join(CACHE_DIR, "gold.parquet")
 
 
+GOLD_FIXES: list[str] = []  # bad bars cleaned by fetch_gold(), for the run summary
+
+
+def _clean_gold(close: pd.Series) -> pd.Series:
+    """
+    A gold ETF never moves 15% in a day, so such a move is a data error. A
+    one-bar spike that reverses the next day is dropped; a lasting jump is taken
+    as an unadjusted split and the earlier history is rescaled to match.
+    """
+    close = close.dropna()
+    for _ in range(20):
+        ret = close.pct_change()
+        bad = ret.abs() > 0.15
+        if not bad.any():
+            break
+        i = int(bad.values.argmax())
+        day = close.index[i]
+        nxt = ret.iloc[i + 1] if i + 1 < len(ret) else 0.0
+        if abs(nxt) > 0.15 and (1 + ret.iloc[i]) * (1 + nxt) - 1 < 0.05:
+            GOLD_FIXES.append(f"{day:%Y-%m-%d}: one-day spike {ret.iloc[i] * 100:+.0f}% dropped")
+            close = close.drop(day)
+        else:
+            ratio = close.iloc[i] / close.iloc[i - 1]
+            GOLD_FIXES.append(f"{day:%Y-%m-%d}: jump {ret.iloc[i] * 100:+.0f}% treated as a split, earlier prices ×{ratio:.4f}")
+            close.iloc[:i] = close.iloc[:i] * ratio
+    for f in GOLD_FIXES:
+        logger.warning("%s %s", GOLD_TICKER, f)
+    return close
+
+
 def fetch_gold(period: str = "10y", force: bool = False) -> pd.Series:
-    """Gold ETF daily close (cached), for the backtest's gold slice (STRATEGY.md §19)."""
+    """Gold ETF daily close (cached, cleaned), for the backtest's gold slice (STRATEGY.md §19)."""
     if not force and os.path.exists(GOLD_CACHE_PATH):
-        return pd.read_parquet(GOLD_CACHE_PATH)["Close"]
-    close = _fetch_benchmark(period, ticker=GOLD_TICKER)
-    big = close.pct_change().abs() > 0.15
-    if big.any():
-        logger.warning("%s: %d daily moves over 15%% — check for bad bars: %s",
-                       GOLD_TICKER, int(big.sum()), list(close.index[big].strftime("%Y-%m-%d")))
+        return _clean_gold(pd.read_parquet(GOLD_CACHE_PATH)["Close"])
+    raw = _fetch_benchmark(period, ticker=GOLD_TICKER)
     os.makedirs(CACHE_DIR, exist_ok=True)
-    close.to_frame(name="Close").to_parquet(GOLD_CACHE_PATH)
+    raw.to_frame(name="Close").to_parquet(GOLD_CACHE_PATH)
+    close = _clean_gold(raw)
     logger.info("Cached %s: %d bars, %s to %s", GOLD_TICKER, len(close), close.index[0].date(), close.index[-1].date())
     return close
+
+
+def fetch_gold_reference(period: str = "10y") -> pd.Series:
+    """International gold (COMEX futures, USD/oz) × USD/INR — a cross-check on the ETF's returns, not traded."""
+    gc = _fetch_benchmark(period, ticker="GC=F")
+    fx = _fetch_benchmark(period, ticker="INR=X")
+    both = pd.concat([gc, fx], axis=1, keys=["gc", "fx"]).ffill().dropna()
+    return both["gc"] * both["fx"]
 
 
 def _fetch_benchmark(period: str, ticker: str = BENCHMARK_TICKER) -> pd.Series:

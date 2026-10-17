@@ -24,7 +24,7 @@ import pandas as pd
 
 from modules.sector_mapper import build_universe
 
-from .data_cache import GOLD_TICKER, fetch_and_cache, fetch_gold
+from .data_cache import GOLD_FIXES, GOLD_TICKER, fetch_and_cache, fetch_gold, fetch_gold_reference
 from .metrics import _cagr, _max_drawdown, _sharpe, compute_metrics
 from .simulator import BacktestConfig, run_backtest
 
@@ -192,6 +192,12 @@ def main() -> int:
         lines.append(f"| *Gold ({GOLD_TICKER}) buy & hold* | | | | | | | {g_cagr:+.1f} | {_cagr_since(gold_bh, 3):+.1f} | "
                      f"{g_dd:.1f} | {_sharpe(gold_bh):.2f} | {g_cagr / abs(g_dd) if g_dd else 0:.2f} |")
         yearly["Gold"] = gold_bh
+        try:
+            ref = fetch_gold_reference(args.period)
+            yearly["Gold, COMEX × USD/INR (check)"] = ref[(ref.index >= window[0]) & (ref.index <= window[1])]
+        except Exception as e:  # a cross-check only — never fail the run over it
+            logger.warning("Gold reference series unavailable: %s", e)
+        lines += ["", f"Gold data fixes ({GOLD_TICKER}): " + ("; ".join(GOLD_FIXES) if GOLD_FIXES else "none")]
     lines += breakdown
     lines += _yearly_table({**yearly, "Nifty500": bench}, bench)
     text = "\n".join(lines)
