@@ -25,8 +25,27 @@ UNIVERSE_CACHE_PATH = os.path.join(CACHE_DIR, "universe_5y.parquet")
 BENCHMARK_CACHE_PATH = os.path.join(CACHE_DIR, "benchmark_5y.parquet")
 
 
-def _fetch_benchmark(period: str) -> pd.Series:
-    df = yf.download(BENCHMARK_TICKER, period=period, interval="1d", auto_adjust=True, progress=False)
+GOLD_TICKER = "GOLDBEES.NS"  # Nippon India Gold BeES, the oldest and most traded gold ETF on NSE
+GOLD_CACHE_PATH = os.path.join(CACHE_DIR, "gold.parquet")
+
+
+def fetch_gold(period: str = "10y", force: bool = False) -> pd.Series:
+    """Gold ETF daily close (cached), for the backtest's gold slice (STRATEGY.md §19)."""
+    if not force and os.path.exists(GOLD_CACHE_PATH):
+        return pd.read_parquet(GOLD_CACHE_PATH)["Close"]
+    close = _fetch_benchmark(period, ticker=GOLD_TICKER)
+    big = close.pct_change().abs() > 0.15
+    if big.any():
+        logger.warning("%s: %d daily moves over 15%% — check for bad bars: %s",
+                       GOLD_TICKER, int(big.sum()), list(close.index[big].strftime("%Y-%m-%d")))
+    os.makedirs(CACHE_DIR, exist_ok=True)
+    close.to_frame(name="Close").to_parquet(GOLD_CACHE_PATH)
+    logger.info("Cached %s: %d bars, %s to %s", GOLD_TICKER, len(close), close.index[0].date(), close.index[-1].date())
+    return close
+
+
+def _fetch_benchmark(period: str, ticker: str = BENCHMARK_TICKER) -> pd.Series:
+    df = yf.download(ticker, period=period, interval="1d", auto_adjust=True, progress=False)
     close = df["Close"]
     if isinstance(close, pd.DataFrame):
         close = close.iloc[:, 0]

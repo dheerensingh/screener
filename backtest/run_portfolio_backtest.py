@@ -1,7 +1,7 @@
 """
 Backtest: rule-change comparison (STRATEGY.md §17, §18)
 
-    python -m backtest.run_portfolio_backtest [--period 10y] [--force-refetch]
+    python -m backtest.run_portfolio_backtest [--period 10y] [--force-refetch] [--suite cash_gold|fixes]
 
 Runs the live configuration (Trend Template entry, trailing exit) next to
 variants that each change one rule, plus combinations, and prints one
@@ -9,7 +9,9 @@ comparison table next to Nifty500 buy & hold. §18's variants test the fixes
 suggested by the first two weeks of paper trading: the 8% stop cap, adds to
 winners, buying back a stock right after a loss, small-cap concentration and
 sizing in a down market. A second table splits the live rules' own trades by
-those same conditions. Both are written to $GITHUB_STEP_SUMMARY in Actions.
+those same conditions. §19's suite (the default) adds a liquid-fund yield on
+idle cash and a gold ETF slice held while gold's long-term trend is up. Results
+are written to $GITHUB_STEP_SUMMARY in Actions.
 """
 
 import argparse
@@ -22,7 +24,7 @@ import pandas as pd
 
 from modules.sector_mapper import build_universe
 
-from .data_cache import fetch_and_cache
+from .data_cache import GOLD_TICKER, fetch_and_cache, fetch_gold
 from .metrics import _cagr, _max_drawdown, _sharpe, compute_metrics
 from .simulator import BacktestConfig, run_backtest
 
@@ -36,7 +38,7 @@ FIX_A = dict(stop_rule="atr")
 FIX_B = dict(add_min_open_r=1.0)
 FIX_C = dict(reentry_cooldown_days=10)
 FIX_D = dict(max_small_cap_heat_pct=4.0, regime_down_risk_scale=0.5)
-VARIANTS = [
+FIXES = [
     ("Live rules", BASE),
     ("Old: 2/sector, max 8, no adds", OLD),
     ("A1 Stop = full 2xATR (fewer shares)", replace(BASE, **FIX_A)),
@@ -51,7 +53,23 @@ VARIANTS = [
     ("B1+D1", replace(BASE, **FIX_B, max_small_cap_heat_pct=4.0)),
     ("B1+D1+D2", replace(BASE, **FIX_B, **FIX_D)),
 ]
-YEARLY = ("Live rules", "Old: 2/sector, max 8, no adds", "B1+D1")  # variants in the year-by-year table
+LIQ = replace(BASE, idle_cash_yield=True)
+CASH_GOLD = [
+    ("Live rules (idle cash earns nothing)", BASE),
+    ("+ liquid fund on idle cash", LIQ),
+    ("+ liquid + gold 10%, always", replace(LIQ, gold_weight_pct=10.0, gold_trend="always")),
+    ("+ liquid + gold 10% above 200-DMA", replace(LIQ, gold_weight_pct=10.0)),
+    ("+ liquid + gold 20%, always", replace(LIQ, gold_weight_pct=20.0, gold_trend="always")),
+    ("+ liquid + gold 20% above 200-DMA", replace(LIQ, gold_weight_pct=20.0)),
+    ("+ liquid + gold 20% up over 12 months", replace(LIQ, gold_weight_pct=20.0, gold_trend="12m")),
+    ("+ liquid + gold 30% above 200-DMA", replace(LIQ, gold_weight_pct=30.0)),
+]
+SUITES = {
+    # suite -> (variants, variants in the year-by-year table, show the per-condition trade split)
+    "fixes": (FIXES, ("Live rules", "Old: 2/sector, max 8, no adds", "B1+D1"), True),
+    "cash_gold": (CASH_GOLD, ("Live rules (idle cash earns nothing)", "+ liquid fund on idle cash",
+                              "+ liquid + gold 20% above 200-DMA"), False),
+}
 
 
 def _avg_names_held(trades, equity: pd.Series) -> float:
@@ -101,8 +119,7 @@ def _breakdown(trades) -> list[str]:
 
 
 def _yearly_table(curves: dict[str, pd.Series], bench: pd.Series) -> list[str]:
-    """Calendar-year % return of each equity curve next to Nifty500's."""
-    curves = {**curves, "Nifty500": bench}
+    """Calendar-year % return of each equity curve (Nifty500 and any reference series included in `curves`)."""
     years = sorted({d.year for d in bench.index})
     lines = ["", "#### Return by calendar year (%)", "",
              "| Year | " + " | ".join(curves) + " |", "|---" * (len(curves) + 1) + "|"]
@@ -120,20 +137,23 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--period", default="10y")
     parser.add_argument("--force-refetch", action="store_true")
+    parser.add_argument("--suite", choices=sorted(SUITES), default="cash_gold")
     args = parser.parse_args()
+    variants, yearly_names, show_breakdown = SUITES[args.suite]
 
     universe_data, benchmark = fetch_and_cache(period=args.period, force=args.force_refetch)
     universe = build_universe()
     sector_by_ticker = {u.ticker: u.sector for u in universe}
     cap_band_by_ticker = {u.ticker: u.cap_band for u in universe}
+    gold = fetch_gold(period=args.period, force=args.force_refetch)
 
     rows = []
     window = None
     breakdown: list[str] = []
     yearly: dict[str, pd.Series] = {}
-    for name, cfg in VARIANTS:
+    for name, cfg in variants:
         logger.info("Running: %s", name)
-        trades, equity = run_backtest(universe_data, benchmark, sector_by_ticker, cap_band_by_ticker, cfg)
+        trades, equity = run_backtest(universe_data, benchmark, sector_by_ticker, cap_band_by_ticker, cfg, gold=gold)
         m = compute_metrics(trades, equity)
         window = window or (equity.index[0], equity.index[-1])
         adds = [t for t in trades if t.is_add]
@@ -142,19 +162,21 @@ def main() -> int:
         rows.append((name, m.total_trades, len(adds), m.win_rate_pct, add_win, avg_r, _avg_names_held(trades, equity),
                      m.cagr_pct, _cagr_since(equity, 3), m.max_drawdown_pct, m.sharpe_ratio,
                      m.cagr_pct / abs(m.max_drawdown_pct) if m.max_drawdown_pct else 0.0))
-        if cfg is BASE:
+        if cfg is BASE and show_breakdown:
             breakdown = _breakdown(trades)
-        if name in YEARLY:
+        if name in yearly_names:
             yearly[name] = equity
 
     bench = benchmark.dropna()
     bench = bench[(bench.index >= window[0]) & (bench.index <= window[1])]
     bh_cagr, bh_dd, bh_sharpe = _cagr(bench), _max_drawdown(bench), _sharpe(bench)
     bh_cagr3 = _cagr_since(bench, 3)
+    gold_bh = gold.dropna()
+    gold_bh = gold_bh[(gold_bh.index >= window[0]) & (gold_bh.index <= window[1])]
 
     lines = [
         f"### Portfolio rules backtest — {window[0]:%Y-%m-%d} to {window[1]:%Y-%m-%d}, "
-        f"{len(universe_data)} stocks, Trend Template + trailing exit",
+        f"{len(universe_data)} stocks, Trend Template + trailing exit, suite `{args.suite}`",
         "",
         "| Variant | Trades | Adds | Win % | Add win % | Avg R | Avg stocks held | CAGR % | CAGR last 3y % "
         "| Max DD % | Sharpe | Calmar |",
@@ -165,8 +187,13 @@ def main() -> int:
                      .format(*r))
     lines.append(f"| *Nifty500 buy & hold* | | | | | | | {bh_cagr:+.1f} | {bh_cagr3:+.1f} | {bh_dd:.1f} | {bh_sharpe:.2f} | "
                  f"{bh_cagr / abs(bh_dd) if bh_dd else 0:.2f} |")
+    if args.suite == "cash_gold" and len(gold_bh) > 1:
+        g_cagr, g_dd = _cagr(gold_bh), _max_drawdown(gold_bh)
+        lines.append(f"| *Gold ({GOLD_TICKER}) buy & hold* | | | | | | | {g_cagr:+.1f} | {_cagr_since(gold_bh, 3):+.1f} | "
+                     f"{g_dd:.1f} | {_sharpe(gold_bh):.2f} | {g_cagr / abs(g_dd) if g_dd else 0:.2f} |")
+        yearly["Gold"] = gold_bh
     lines += breakdown
-    lines += _yearly_table(yearly, bench)
+    lines += _yearly_table({**yearly, "Nifty500": bench}, bench)
     text = "\n".join(lines)
     print(text)
     summary = os.environ.get("GITHUB_STEP_SUMMARY")

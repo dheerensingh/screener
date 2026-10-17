@@ -40,6 +40,7 @@ from modules.portfolio_allocator import (
     CAP_BAND_RISK_PCT, MAX_DEPLOYED_CAPITAL_PCT, MAX_PORTFOLIO_HEAT_PCT, MAX_TOTAL_POSITIONS,
     RISK_SCALE, Holding, add_blocker, add_risk_fraction, sector_slots,
 )
+from modules.cash_yield import interest as cash_interest
 from modules.position_sizer import DEFAULT_MAX_POSITION_PCT
 from modules.technical_analyzer import _macd, _rsi, atr as compute_atr
 from modules.trend_template import PCT_ABOVE_52W_LOW_MIN, PCT_BELOW_52W_HIGH_MAX, RS_RATING_THRESHOLD
@@ -73,6 +74,7 @@ LOOKBACK_WEIGHTS = {"1M": 0.5, "3M": 0.3, "6M": 0.2}
 
 EntryParadigm = Literal["trend_template", "rsi_macd_only", "vcp_breakout"]
 ExitParadigm = Literal["trailing", "fixed_target", "scale_out"]
+GoldTrend = Literal["always", "sma200", "12m"]
 StopRule = Literal["cap", "atr", "skip_wide"]
 
 
@@ -104,6 +106,10 @@ class BacktestConfig:
     reentry_cooldown_days: int = 0       # sessions a stock is barred after a losing exit
     max_small_cap_heat_pct: Optional[float] = None  # cap on the risk carried by small caps, % of capital
     regime_down_risk_scale: float = 1.0  # risk multiplier for entries decided while the market regime is down
+    # Money outside the swing book (STRATEGY.md §19). Needs run_backtest(gold=...) for the gold slice.
+    idle_cash_yield: bool = False        # idle cash earns modules/cash_yield.py's liquid-fund rate
+    gold_weight_pct: float = 0.0         # % of equity held in a gold ETF, rebalanced monthly
+    gold_trend: GoldTrend = "sma200"     # hold gold only when "sma200": above its 200-day SMA | "12m": up over 12 months
 
 
 @dataclass
@@ -235,6 +241,7 @@ def run_backtest(
     start: Optional[str] = None,
     end: Optional[str] = None,
     delivery_data: Optional[dict[str, pd.Series]] = None,
+    gold: Optional[pd.Series] = None,
 ) -> tuple[list[Trade], pd.Series]:
     """
     Runs the full sector-rotation + momentum + portfolio strategy over history.
@@ -245,6 +252,7 @@ def run_backtest(
         signals after the fact (no change to `_per_ticker_signals()` itself), and
         only used at all when `config.require_delivery_above_median` is True. See
         STRATEGY.md §13 for the tested hypothesis this exists to check.
+    gold : optional gold ETF close series, for `config.gold_weight_pct`.
     """
     logger.info("Precomputing signals for %d tickers ...", len(universe_data))
     signals: dict[str, pd.DataFrame] = {}
@@ -309,6 +317,21 @@ def run_backtest(
     # Need enough lookback history before the window starts for indicators to be valid.
     trading_days = trading_days[252:] if len(trading_days) > 252 else trading_days
 
+    # Gold slice: signal from the previous close, traded at the next close; marked daily into `cash`.
+    gold_close = gold_on = None
+    if config.gold_weight_pct > 0 and gold is not None:
+        gold_close = gold.dropna().reindex(trading_days).ffill()
+        if config.gold_trend == "always":
+            gold_on = pd.Series(True, index=gold_close.index)
+        elif config.gold_trend == "12m":
+            gold_on = gold_close > gold_close.shift(252)
+        else:
+            gold_on = gold_close > gold_close.rolling(200, min_periods=200).mean()
+        gold_on = gold_on.shift(1, fill_value=False)
+    gold_units, gold_prev_px = 0.0, float("nan")
+    prev_day: Optional[pd.Timestamp] = None
+    idle_cash = 0.0  # yesterday's cash outside stocks and gold
+
     open_positions: dict[str, OpenPosition] = {}
     closed_trades: list[Trade] = []
     equity_curve: list[tuple[pd.Timestamp, float]] = []
@@ -323,11 +346,21 @@ def run_backtest(
     halted_since_idx: Optional[int] = None  # trading_days index when the halt started, for the cooldown timer
 
     for i, day in enumerate(trading_days):
+        # ── 0. Liquid-fund income on yesterday's idle cash; gold marked to today's close ──
+        if config.idle_cash_yield and prev_day is not None:
+            cash += cash_interest(idle_cash, prev_day.date(), day.date())
+        gold_px = float(gold_close.get(day)) if gold_close is not None else float("nan")
+        if gold_units and gold_px == gold_px:
+            cash += gold_units * (gold_px - gold_prev_px)
+        if gold_px == gold_px:
+            gold_prev_px = gold_px
+        gold_value = gold_units * gold_px if gold_units and gold_px == gold_px else 0.0
+
         # ── 1. Process pending entries decided on the PREVIOUS day (T+1 open execution) ──
         if pending_entries and day in benchmark.index:
-            deployed_pct = sum(
+            deployed_pct = (sum(
                 p.quantity * signals[p.ticker]["close"].get(day, p.entry_price) for p in open_positions.values()
-            ) / config.account_size * 100.0
+            ) + gold_value) / config.account_size * 100.0
             heat_pct = sum(p.risk_amount for p in open_positions.values()) / config.account_size * 100.0
             small_heat_pct = sum(
                 p.risk_amount for p in open_positions.values() if p.cap_band == "Small"
@@ -593,7 +626,24 @@ def run_backtest(
             p.quantity * (float(signals[p.ticker]["close"].get(day, p.entry_price)) - p.entry_price)
             for p in open_positions.values()
         )
+
+        # Gold: on the first session of each month, move to the target weight at today's close.
+        if gold_close is not None and gold_px == gold_px and gold_px > 0:
+            new_month = prev_day is None or day.month != prev_day.month
+            if new_month or (gold_units and not gold_on.get(day, False)):
+                target = equity * config.gold_weight_pct / 100.0 if gold_on.get(day, False) else 0.0
+                traded = abs(target - gold_units * gold_px)
+                if traded > 0.02 * equity or target == 0.0:
+                    cash -= traded * TRANSACTION_COST_PCT / 200.0  # one side
+                    equity -= traded * TRANSACTION_COST_PCT / 200.0
+                    gold_units = target / gold_px
+                    gold_value = target
         equity_curve.append((day, equity))
+        stocks_value = sum(
+            p.quantity * float(signals[p.ticker]["close"].get(day, p.entry_price)) for p in open_positions.values()
+        )
+        idle_cash = max(0.0, equity - stocks_value - gold_value)
+        prev_day = day
 
         # Portfolio-level drawdown circuit breaker: halts NEW entries — via
         # `entries_halted`, checked in section 4 above — once *this strategy's
