@@ -19,9 +19,22 @@ module is the actual paper account. Each daily run (from main.py):
      for the allocator.
   4. Snapshot — one row per market date in paper_equity.csv for the dashboard.
 
+Gold (STRATEGY.md §19): portfolio_allocator.GOLD_WEIGHT_PCT of equity is held in
+a gold ETF. plan_gold() books an order on the first run of each month when the
+holding is more than GOLD_REBALANCE_BAND_PCT away from target (and on the very
+first run); it fills at the next session's open like a stock order, after the
+stock orders, limited to the cash left. Gold orders are their own ledger,
+paper_gold.csv.
+
+Idle cash is assumed to sit in a liquid fund (STRATEGY.md §19): each run credits
+modules/cash_yield.py's rate on the previous snapshot's cash, for the calendar
+days since it. The running total is the `cash_income` column of paper_equity.csv
+(credited from 2026-10-19 on, not back-dated).
+
 All state lives in two committed CSVs: paper_trades.csv (one row per order, its
-whole lifecycle) and paper_equity.csv (daily snapshots). Cash is re-derived from
-the ledger every run rather than stored, so the two files can't drift apart.
+whole lifecycle), paper_gold.csv (gold orders) and paper_equity.csv (daily
+snapshots). Cash is re-derived from the two ledgers every run (plus the
+liquid-fund income above) rather than stored, so the files can't drift apart.
 
 Costs: COST_PCT_PER_SIDE on every buy and sell. Deliberately higher than the
 backtest's 0.1% round trip — Indian delivery trades pay 0.1% STT on *each* side
@@ -38,7 +51,8 @@ from typing import Optional
 
 import pandas as pd
 
-from .portfolio_allocator import Holding
+from .cash_yield import interest as cash_interest
+from .portfolio_allocator import GOLD_REBALANCE_BAND_PCT, GOLD_TICKER, GOLD_WEIGHT_PCT, Holding
 from .stock_fetcher import fetch_stock_data
 from .technical_analyzer import _rsi, atr as compute_atr
 
@@ -46,8 +60,10 @@ logger = logging.getLogger(__name__)
 
 LEDGER_PATH = "paper_trades.csv"
 EQUITY_PATH = "paper_equity.csv"
+GOLD_PATH = "paper_gold.csv"
 
 COST_PCT_PER_SIDE = 0.15
+GOLD_COST_PCT_PER_SIDE = 0.05  # gold ETFs pay no STT; brokerage and exchange charges only
 
 # Must match backtest/simulator.py's "trailing" exit paradigm and STRATEGY.md §5 —
 # duplicated rather than imported to keep modules/ from depending on backtest/.
@@ -67,8 +83,9 @@ LEDGER_FIELDS = [
 ]
 EQUITY_FIELDS = [
     "date", "equity", "cash", "market_value", "realized_pnl", "unrealized_pnl",
-    "open_positions", "pending_orders", "benchmark_close",
+    "open_positions", "pending_orders", "benchmark_close", "cash_income", "gold_value",
 ]
+GOLD_FIELDS = ["order_id", "status", "signal_date", "signal_price", "units", "fill_date", "fill_price", "cost", "note"]
 
 
 @dataclass
@@ -104,6 +121,15 @@ class PaperState:
     closed_today: list[dict] = field(default_factory=list)
     cancelled_today: list[dict] = field(default_factory=list)
     booked_today: list[dict] = field(default_factory=list)
+    cash_income: float = 0.0  # liquid-fund income credited so far (included in cash)
+    gold_units: int = 0
+    gold_price: float = 0.0
+    gold_cost_basis: float = 0.0  # rupees paid for the gold still held, costs included
+    gold_orders: list[dict] = field(default_factory=list)
+
+    @property
+    def gold_value(self) -> float:
+        return self.gold_units * self.gold_price
 
     @property
     def market_value(self) -> float:
@@ -111,7 +137,7 @@ class PaperState:
 
     @property
     def equity(self) -> float:
-        return self.cash + self.market_value
+        return self.cash + self.market_value + self.gold_value
 
     @property
     def unrealized_pnl(self) -> float:
@@ -158,6 +184,11 @@ def _derive_cash(ledger: list[dict], start_capital: float) -> float:
             sell = int(r["quantity"]) * float(r["exit_price"])
             cash += sell - _cost(sell)
     return cash
+
+
+def _gold_spend(orders: list[dict]) -> float:
+    """Net cash paid into gold by filled orders (a sale has negative units, so it returns cash)."""
+    return sum(int(o["units"]) * float(o["fill_price"]) + float(o["cost"]) for o in orders if o["status"] == "FILLED")
 
 
 def _bars_after(df: pd.DataFrame, date_str: str) -> pd.DataFrame:
@@ -224,11 +255,15 @@ def _close_row(row: dict, exit_date: str, exit_price: float, reason: str) -> Non
 
 
 class PaperTrader:
-    def __init__(self, start_capital: float, ledger_path: str = LEDGER_PATH, equity_path: str = EQUITY_PATH):
+    def __init__(self, start_capital: float, ledger_path: str = LEDGER_PATH, equity_path: str = EQUITY_PATH,
+                 gold_path: str = GOLD_PATH):
         self.start_capital = start_capital
         self.ledger_path = ledger_path
         self.equity_path = equity_path
+        self.gold_path = gold_path
         self.ledger = _read_csv(ledger_path)
+        self.gold_orders = _read_csv(gold_path) if os.path.exists(gold_path) else []
+        self.gold_price = 0.0
         self.equity_history = _read_csv(equity_path)
         self.as_of: Optional[str] = None
         self.data: dict[str, pd.DataFrame] = {}
@@ -237,10 +272,109 @@ class PaperTrader:
         self.closed_today: list[dict] = []
         self.cancelled_today: list[dict] = []
         self.booked_today: list[dict] = []
+        self.cash_income = 0.0
+
+    def _cash(self) -> float:
+        return _derive_cash(self.ledger, self.start_capital) + self.cash_income - _gold_spend(self.gold_orders)
+
+    @property
+    def gold_units(self) -> int:
+        return sum(int(o["units"]) for o in self.gold_orders if o["status"] == "FILLED")
+
+    @property
+    def gold_value(self) -> float:
+        return self.gold_units * self.gold_price
+
+    def _gold_cost_basis(self) -> float:
+        """Rupees paid for the units still held (average cost; a sale removes its share)."""
+        units, basis = 0, 0.0
+        for o in self.gold_orders:
+            if o["status"] != "FILLED":
+                continue
+            n = int(o["units"])
+            if n > 0:
+                units, basis = units + n, basis + n * float(o["fill_price"]) + float(o["cost"])
+            elif units:
+                basis *= (units + n) / units
+                units += n
+        return basis
+
+    def _update_gold(self, cash: float) -> None:
+        """Fills a pending gold order at the next open (within `cash`) and marks gold at the as_of close."""
+        df = self.data.get(GOLD_TICKER)
+        if df is None or df.empty:
+            if self.gold_orders:
+                logger.warning("Paper trader: no %s prices — gold left unchanged", GOLD_TICKER)
+            return
+        for o in self.gold_orders:
+            if o["status"] != "PENDING":
+                continue
+            nxt = _bars_after(df, o["signal_date"])
+            if nxt.empty:
+                continue
+            open_px = round(float(nxt.iloc[0]["Open"]), 2)
+            units = int(o["units"])
+            if units > 0:
+                units = min(units, math.floor(cash / (open_px * (1 + GOLD_COST_PCT_PER_SIDE / 100.0))))
+            else:
+                units = -min(-units, self.gold_units)
+            if units == 0 or not open_px > 0:
+                o.update(status="CANCELLED", note="Not enough cash" if open_px > 0 else "No valid opening price")
+                continue
+            value = abs(units) * open_px
+            o.update(status="FILLED", units=str(units), fill_date=nxt.index[0].strftime("%Y-%m-%d"),
+                     fill_price=f"{open_px:.2f}", cost=f"{value * GOLD_COST_PCT_PER_SIDE / 100.0:.2f}")
+            cash -= units * open_px + value * GOLD_COST_PCT_PER_SIDE / 100.0
+        upto = df[df.index <= pd.Timestamp(self.as_of)] if self.as_of else df
+        closes = upto["Close"].dropna()
+        if len(closes) >= 2 and abs(closes.iloc[-1] / closes.iloc[-2] - 1) > 0.15:
+            # Yahoo has served GOLDBEES bars at 1/100 of the price (STRATEGY.md §19) — never mark on one.
+            logger.warning("Paper trader: %s moved %.0f%% on %s — bad bar, using the previous close",
+                           GOLD_TICKER, (closes.iloc[-1] / closes.iloc[-2] - 1) * 100, closes.index[-1].date())
+            closes = closes.iloc[:-1]
+        if len(closes):
+            self.gold_price = float(closes.iloc[-1])
+
+    def plan_gold(self) -> Optional[dict]:
+        """
+        Books a gold order toward GOLD_WEIGHT_PCT of equity, for the next open: on the
+        first run, and on the first run of each month if the holding has drifted more
+        than GOLD_REBALANCE_BAND_PCT of equity. Call after update(), before sizing stocks.
+        """
+        if not self.as_of or not self.gold_price > 0 or any(o["status"] == "PENDING" for o in self.gold_orders):
+            return None
+        month = self.as_of[:7]
+        if any(o["signal_date"][:7] == month for o in self.gold_orders):
+            return None  # already looked at gold this month
+        equity = self._cash() + sum(p.market_value for p in self.positions) + self.gold_value
+        diff = equity * GOLD_WEIGHT_PCT / 100.0 - self.gold_value
+        first = not self.gold_orders
+        if not first and abs(diff) < equity * GOLD_REBALANCE_BAND_PCT / 100.0:
+            return None
+        units = int(diff / self.gold_price)
+        if units == 0:
+            return None
+        order = {k: "" for k in GOLD_FIELDS}
+        order.update(order_id=f"{self.as_of}-GOLD", status="PENDING", signal_date=self.as_of,
+                     signal_price=f"{self.gold_price:.2f}", units=str(units), cost="0",
+                     note=f"{'Buy' if units > 0 else 'Sell'} toward {GOLD_WEIGHT_PCT:.0f}% of equity")
+        self.gold_orders.append(order)
+        logger.info("Paper trader: gold order %+d units of %s (~₹%.0f)", units, GOLD_TICKER, units * self.gold_price)
+        return order
+
+    def _accrue_cash_income(self) -> None:
+        """Liquid-fund income on the last snapshot before as_of — so re-running a session never double-credits."""
+        prev = [h for h in self.equity_history if self.as_of and h["date"] < self.as_of]
+        if not prev:
+            return
+        last = prev[-1]
+        self.cash_income = float(last.get("cash_income") or 0.0) + cash_interest(
+            float(last["cash"]), pd.Timestamp(last["date"]).date(), pd.Timestamp(self.as_of).date(),
+        )
 
     def _ensure_data(self, price_data: dict[str, pd.DataFrame]) -> None:
         self.data = dict(price_data)
-        needed = {r["ticker"] for r in self.ledger if r["status"] in (PENDING, OPEN)}
+        needed = {r["ticker"] for r in self.ledger if r["status"] in (PENDING, OPEN)} | {GOLD_TICKER}
         missing = sorted(t for t in needed if t not in self.data)
         if missing:
             logger.info("Paper trader: fetching prices for %d held ticker(s) outside today's sectors", len(missing))
@@ -253,7 +387,8 @@ class PaperTrader:
         # The most common last bar across all stocks — robust to one stale ticker.
         self.as_of = last_dates.mode().iloc[0].strftime("%Y-%m-%d") if len(last_dates) else None
 
-        cash = _derive_cash(self.ledger, self.start_capital)
+        self._accrue_cash_income()
+        cash = self._cash()
         for row in self.ledger:
             if row["status"] != PENDING:
                 continue
@@ -289,6 +424,7 @@ class PaperTrader:
                     self.filled_today.append(row)
             if row["status"] == CANCELLED:
                 self.cancelled_today.append(row)
+        self._update_gold(cash)
 
         self.positions = []
         for row in self.ledger:
@@ -345,10 +481,12 @@ class PaperTrader:
         return out
 
     def exposure_pct(self, account_size: float) -> tuple[float, float]:
-        """(deployed %, heat %) of open + pending positions — fed to the allocator."""
+        """(deployed %, heat %) of open + pending positions and gold — fed to the allocator."""
         pending = [r for r in self.ledger if r["status"] == PENDING]
         deployed = sum(p.market_value for p in self.positions) + sum(
             int(r["quantity"]) * float(r["signal_price"]) for r in pending
+        ) + self.gold_value + sum(
+            int(o["units"]) * float(o["signal_price"]) for o in self.gold_orders if o["status"] == "PENDING"
         )
         open_rows = [r for r in self.ledger if r["status"] == OPEN]
         heat = sum(float(r["risk_amount"]) for r in open_rows + pending)
@@ -381,16 +519,17 @@ class PaperTrader:
             self.booked_today.append(row)
 
     def snapshot(self, benchmark_close: float) -> None:
-        cash = _derive_cash(self.ledger, self.start_capital)
+        cash = self._cash()
         market_value = sum(p.market_value for p in self.positions)
         realized = sum(float(r["pnl"]) for r in self.ledger if r["status"] == CLOSED)
         row = {
-            "date": self.as_of, "equity": f"{cash + market_value:.2f}", "cash": f"{cash:.2f}",
+            "date": self.as_of, "equity": f"{cash + market_value + self.gold_value:.2f}", "cash": f"{cash:.2f}",
             "market_value": f"{market_value:.2f}", "realized_pnl": f"{realized:.2f}",
             "unrealized_pnl": f"{sum(p.unrealized_pnl for p in self.positions):.2f}",
             "open_positions": str(len(self.positions)),
             "pending_orders": str(sum(1 for r in self.ledger if r["status"] == PENDING)),
-            "benchmark_close": f"{benchmark_close:.2f}",
+            "benchmark_close": f"{benchmark_close:.2f}", "cash_income": f"{self.cash_income:.2f}",
+            "gold_value": f"{self.gold_value:.2f}",
         }
         self.equity_history = [h for h in self.equity_history if h["date"] != self.as_of] + [row]
         self.equity_history.sort(key=lambda h: h["date"])
@@ -398,11 +537,15 @@ class PaperTrader:
     def save(self) -> None:
         _write_csv(self.ledger_path, LEDGER_FIELDS, self.ledger)
         _write_csv(self.equity_path, EQUITY_FIELDS, self.equity_history)
+        if self.gold_orders:
+            _write_csv(self.gold_path, GOLD_FIELDS, self.gold_orders)
 
     def state(self) -> PaperState:
         return PaperState(
             as_of=self.as_of or "", start_capital=self.start_capital,
-            cash=_derive_cash(self.ledger, self.start_capital), positions=self.positions,
+            cash=self._cash(), cash_income=self.cash_income, positions=self.positions,
+            gold_units=self.gold_units, gold_price=self.gold_price, gold_cost_basis=self._gold_cost_basis(),
+            gold_orders=self.gold_orders,
             ledger=self.ledger, equity_history=self.equity_history,
             filled_today=self.filled_today, closed_today=self.closed_today,
             cancelled_today=self.cancelled_today, booked_today=self.booked_today,

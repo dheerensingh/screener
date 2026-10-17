@@ -945,3 +945,182 @@ entry + trailing exit, market filter off unless stated
   Treat this with §9's caveat: today's Nifty500 applied retroactively
   (survivorship bias), and no point-in-time sector membership. §8b's "loses to
   the index on every metric" conclusion was itself a product of the bug.
+
+## 18. Four fixes suggested by the first two weeks of paper trading — tested, none adopted (2026-10-17)
+
+**Why.** After 12 sessions (Oct 1-16) the paper account was -3.3% against
+Nifty500's +1.9%: 12 closed trades, 1 winner, -₹20,923. Eight stops hit on one
+day (Oct 15, small-cap Telecom and Capital Goods) while the index rose. Four
+patterns in those trades looked like rule flaws:
+
+- **A.** 15 of 25 orders had their stop at the 8% cap, i.e. 2xATR was wider
+  than 8% — a stop inside two ordinary days' movement.
+- **B.** All four adds bought on Oct 13 were stopped out two days later; two
+  were added when the first lot was only ~+0.4R in profit.
+- **C.** CPPLUS was bought back the day after a stop-out; HFCL re-qualified
+  the same day it was sold.
+- **D.** 24 of 25 orders were small caps, and they fell together.
+
+**Results** — 2017-10-23 to 2026-10-16, 499 stocks, Trend Template entry +
+trailing exit (`backtest/run_portfolio_backtest.py`, GitHub Actions run
+39018047188; options in `BacktestConfig`, defaults = live):
+
+| Variant | Trades | Win % | Avg R | CAGR | CAGR last 3y | Max DD | Sharpe | Calmar |
+|---|---|---|---|---|---|---|---|---|
+| **Live rules** | 2,298 | 35.8 | +0.18 | **+12.5%** | +3.5% | -26.0% | 1.09 | 0.48 |
+| Old rules (2/sector, max 8, no adds) | 1,098 | 36.2 | +0.24 | +12.2% | +5.1% | -25.4% | 1.13 | 0.48 |
+| A1 Stop = full 2xATR, fewer shares | 2,242 | 37.5 | +0.17 | +11.9% | +4.0% | -25.9% | 1.07 | 0.46 |
+| A2 Skip stocks with 2xATR > 8% | 1,595 | 37.6 | +0.15 | +9.0% | +0.9% | -21.7% | 0.94 | 0.41 |
+| B1 Adds only when first lot >= +1R | 2,102 | 35.6 | +0.20 | +12.3% | +2.8% | -24.2% | 1.11 | 0.51 |
+| B2 No adds | 1,675 | 36.6 | +0.19 | +11.8% | +2.2% | -19.8% | 1.13 | 0.59 |
+| C Wait 10 sessions after a loss | 2,180 | 35.9 | +0.15 | +10.8% | +3.4% | -30.5% | 0.96 | 0.35 |
+| D1 Small-cap risk <= 4% of capital | 2,269 | 35.0 | +0.18 | +12.4% | +3.3% | -21.8% | 1.13 | 0.57 |
+| D2 Half risk when market regime is down | 2,531 | 36.2 | +0.22 | +11.4% | +3.3% | -21.8% | 1.18 | 0.52 |
+| A1+B1+C | 1,954 | 37.4 | +0.16 | +10.4% | +2.9% | -26.0% | 1.01 | 0.40 |
+| A1+B1+C+D1+D2 | 2,067 | 38.7 | +0.20 | +9.6% | +3.6% | -20.4% | 1.11 | 0.47 |
+| B1+D1 | 2,103 | 35.9 | +0.20 | +12.2% | +3.3% | -25.5% | 1.10 | 0.48 |
+| B1+D1+D2 | 2,262 | 36.5 | +0.22 | +10.6% | +3.5% | -19.2% | 1.14 | 0.55 |
+| *Nifty500 buy & hold* | | | | +10.7% | +8.6% | -38.3% | 0.71 | 0.28 |
+
+The live rules' own trades, split by the same conditions:
+
+| Group | Trades | Win % | Avg R |
+|---|---|---|---|
+| Stop at the 8% cap | 1,161 | 35.4 | **+0.26** |
+| Stop = 2xATR (under 8%) | 1,137 | 36.1 | +0.10 |
+| Bought within 10 sessions of a loss in the same stock | 299 | 32.8 | **+0.32** |
+| Other buys | 1,999 | 36.2 | +0.16 |
+| Adds, first lot < +1R | 355 | 35.2 | +0.06 |
+| Adds, first lot >= +1R | 482 | 36.7 | +0.23 |
+| Small caps | 1,075 | 34.6 | +0.17 |
+| Mid + large caps | 1,223 | 36.8 | +0.19 |
+
+Return by calendar year (%; 2017 from Oct 23, 2026 to Oct 16):
+
+| Year | Live | Old rules | Nifty500 |
+|---|---|---|---|
+| 2017 | -6.0 | -2.7 | +5.8 |
+| 2018 | -11.8 | -9.1 | -3.4 |
+| 2019 | +4.1 | +2.0 | +7.7 |
+| 2020 | +41.7 | +39.8 | +16.7 |
+| 2021 | +61.4 | +53.2 | +30.2 |
+| 2022 | +11.2 | +9.5 | +3.0 |
+| 2023 | +21.7 | +20.0 | +25.8 |
+| 2024 | +6.1 | +8.8 | +15.2 |
+| 2025 | -2.6 | +0.2 | +6.7 |
+| 2026 | +4.0 | +1.7 | -6.7 |
+
+**Honest reading.**
+
+- **A and C are wrong diagnoses.** Trades whose stop sat at the 8% cap earned
+  more per unit of risk (+0.26R vs +0.10R): the cap makes R small on the most
+  volatile, fastest-moving names, so their winners count for more R. Buying a
+  stock back soon after a loss also did better than average (+0.32R) — a
+  leader that shakes out and re-qualifies is often still a leader. Removing
+  either lowers CAGR.
+- **B and D cut drawdown, not return, and not reliably.** D1 alone takes max
+  DD from -26.0% to -21.8% for 0.1pp of CAGR, but B1+D1 is back at -25.5%:
+  max drawdown is one path-dependent number and moves several points on small
+  rule changes (§17 saw 8pp between two fetches of the same data). Adds below
+  +1R do earn less (+0.06R vs +0.23R), but filtering them barely moves CAGR.
+- **No change is clearly better than the live rules, so none is adopted.** The
+  two weeks of losses came from the market (a small-cap sell-off in the two
+  sectors the book was in), not from a rule that 9 years of data says is broken.
+- **The bigger finding is the year table.** The strategy beat the index in
+  2020-2022 and 2026 and lagged it in the other six years, including 2023-2025.
+  Most of its 9-year edge comes from the 2020-21 small/mid-cap momentum run.
+  Over the last 3 years it made +3.5% a year against the index's +8.6%. With
+  §9's survivorship bias on top, the honest expectation is: it outperforms in
+  broad momentum markets and lags the index in large-cap-led or choppy ones.
+- **Idle cash is untested.** The book averages ~50% in cash, which earns
+  nothing in the backtest or the paper account. A liquid fund on that cash is
+  the next thing worth measuring.
+
+## 19. Idle cash in a liquid fund, and a gold slice (2026-10-17)
+
+**Why.** §18's year table showed the book averages ~50% cash, and that cash
+earned nothing in the backtest or the paper account. The user also asked to
+test holding a share of gold, with a long-term momentum rule.
+
+**Rules tested** (`BacktestConfig.idle_cash_yield`, `gold_weight_pct`,
+`gold_trend`; the yield table is `modules/cash_yield.py`):
+
+- **Liquid fund.** Cash not in stocks or gold earns an approximate yearly
+  Indian liquid-fund return (3.3% in 2021 to 7.2% in 2018/2024), credited for
+  calendar days held. Before tax: since April 2023 debt-fund gains are taxed at
+  the slab rate, so the after-tax gain is roughly a quarter to a third smaller.
+- **Gold.** GOLDBEES.NS held at a fixed % of equity, rebalanced on the first
+  session of each month at the close (signal from the previous close). With a
+  trend rule it is held only while gold is above its 200-day SMA, or up over 12
+  months, and sold the day the rule turns off. Gold counts toward the 85%
+  capital cap, so it leaves less room for stocks. Costs 0.05% per side.
+- **Data.** Yahoo's GOLDBEES series had two bars at 1/100 of the real price
+  (2019-12-19/20, giving a fake -99% drawdown); `data_cache._clean_gold` fixes
+  such bars and lists them in the run summary. The yearly returns were checked
+  against COMEX gold × USD/INR and agree within a few points, except 2024
+  (+19% vs +33%: India cut its gold import duty in July 2024, lowering
+  domestic prices).
+
+**Results** — 2017-10-23 to 2026-10-16, live rules otherwise (GitHub Actions
+run 39019468815):
+
+| Variant | Trades | Avg stocks held | CAGR | CAGR last 3y | Max DD | Sharpe | Calmar |
+|---|---|---|---|---|---|---|---|
+| Live rules, idle cash earns nothing | 2,298 | 9.5 | +12.5% | +3.5% | -26.0% | 1.09 | 0.48 |
+| **+ liquid fund on idle cash (live from 2026-10-19)** | 2,298 | 9.5 | **+15.5%** | +8.6% | -23.1% | 1.38 | 0.67 |
+| + liquid + gold 10%, always | 2,053 | 8.8 | **+16.1%** | +12.4% | **-16.0%** | **1.59** | **1.00** |
+| + liquid + gold 10% above 200-DMA | 2,151 | 9.0 | +15.4% | +10.7% | -19.0% | 1.48 | 0.81 |
+| + liquid + gold 20%, always | 1,817 | 7.9 | +14.5% | +12.5% | -14.4% | 1.54 | 1.01 |
+| + liquid + gold 20% above 200-DMA | 1,868 | 8.1 | +15.6% | +12.3% | -17.6% | 1.50 | 0.89 |
+| + liquid + gold 20% up over 12 months | 1,855 | 8.0 | +14.9% | +12.7% | -17.0% | 1.46 | 0.87 |
+| + liquid + gold 30% above 200-DMA | 1,497 | 6.5 | +15.1% | +13.4% | -17.5% | 1.46 | 0.86 |
+| *Nifty500 buy & hold* | | | +10.7% | +8.6% | -38.3% | 0.71 | 0.28 |
+| *Gold buy & hold* | | | +18.3% | +33.6% | -24.4% | 1.12 | 0.75 |
+
+Return by calendar year (%):
+
+| Year | Live, cash idle | + liquid | + liquid + gold 20% >200-DMA | Gold | Nifty500 |
+|---|---|---|---|---|---|
+| 2017 | -6.0 | -5.7 | -5.7 | -1.1 | +5.8 |
+| 2018 | -11.8 | -9.5 | -9.6 | +6.7 | -3.4 |
+| 2019 | +4.1 | +5.5 | +11.0 | +23.1 | +7.7 |
+| 2020 | +41.9 | +41.9 | +36.8 | +27.0 | +16.7 |
+| 2021 | +61.3 | +61.4 | +62.9 | -5.2 | +30.2 |
+| 2022 | +11.2 | +14.1 | +7.8 | +12.8 | +3.0 |
+| 2023 | +21.7 | +25.6 | +14.3 | +14.7 | +25.8 |
+| 2024 | +6.1 | +11.6 | +12.3 | +19.4 | +15.2 |
+| 2025 | -2.6 | +3.0 | +16.9 | +71.8 | +6.7 |
+| 2026 | +4.0 | +7.1 | +7.5 | +8.8 | -6.7 |
+
+**Honest reading.**
+
+- **The liquid fund is a plain improvement** (+3.0pp CAGR, same trades): it
+  is money the account already has, earning what any idle balance can. Adopted
+  in the paper account from 2026-10-19 (not back-dated) — `paper_trader.py`
+  credits it on each snapshot's cash; `cash_income` in `paper_equity.csv`.
+  In real trading this means parking cash in a liquid fund or liquid ETF and
+  redeeming before buys (liquid funds pay out T+1).
+- **Gold's return here is mostly one exceptional period.** Gold made +18.3% a
+  year in rupees over these 9 years, including +72% in 2025; its long-run
+  rupee return is closer to 10-11%. Don't read the gold rows' CAGR as
+  repeatable.
+- **Gold's diversification is the durable part.** It rose when the strategy
+  lost (2018: +6.7% vs -11.8%; 2019, 2024, 2025) and was flat when the strategy
+  boomed (2021). That is why even 10-20% gold roughly halves max drawdown
+  (-23% → -14% to -16%) and lifts Sharpe from 1.38 to ~1.5 — a benefit that
+  doesn't need gold to keep rising 18% a year.
+- **The trend rule didn't help gold.** "Always held" beat "above the 200-DMA"
+  at 10% (16.1% / -16.0% vs 15.4% / -19.0%) and matched it at 20%. Selling gold
+  on dips below its average mostly missed rebounds in a long bull market. A
+  plain fixed share, rebalanced monthly, is simpler and did as well or better.
+- **Gold costs stock exposure.** It counts against the 85% capital cap, so the
+  book holds fewer stocks (9.5 → 7.9 at 20%) and the strategy's own trades
+  contribute less.
+- **Adopted: 10% gold, always held** (user's decision, 2026-10-17), in the
+  paper account from the 2026-10-19 run. `portfolio_allocator.GOLD_WEIGHT_PCT`
+  = 10, `GOLD_REBALANCE_BAND_PCT` = 2: `paper_trader.plan_gold()` books a buy on
+  the first run, then on the first run of each month brings gold back to 10%
+  if it has drifted more than 2% of equity; orders fill at the next open, after
+  stock orders, within the cash left (ledger `paper_gold.csv`, 0.05% per side).
+  Gold counts toward the 85% capital cap. `BacktestConfig`'s defaults now equal
+  this live setup (liquid fund on, gold 10% always).

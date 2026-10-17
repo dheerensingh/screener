@@ -25,7 +25,8 @@ from zoneinfo import ZoneInfo
 
 from .fii_dii_flow import FlowResult
 from .market_regime import MarketRegime
-from .paper_trader import COST_PCT_PER_SIDE, EQUITY_PATH, LEDGER_PATH, PaperState
+from .paper_trader import COST_PCT_PER_SIDE, EQUITY_PATH, GOLD_PATH, LEDGER_PATH, PaperState
+from .portfolio_allocator import GOLD_WEIGHT_PCT
 from .sector_rotation import SectorScore
 
 logger = logging.getLogger(__name__)
@@ -164,7 +165,12 @@ def build_dashboard_html(
               f"difference {_signed(alpha, '+.2f', ' pp')}" if alpha == alpha else "first snapshot today"),
         _tile("Realized P&L", _signed_inr(state.realized_pnl), f"{len(closed)} closed trade{'s' if len(closed) != 1 else ''}"),
         _tile("Unrealized P&L", _signed_inr(state.unrealized_pnl), f"{len(state.positions)} open position{'s' if len(state.positions) != 1 else ''}"),
-        _tile("Cash", inr(state.cash), f"{cash_pct:.0f}% of equity · {len(state.pending)} order{'s' if len(state.pending) != 1 else ''} for next open"),
+        _tile("Gold ETF", inr(state.gold_value),
+              (f"{state.gold_value / equity * 100:.0f}% of equity · "
+               f"{_signed_inr(state.gold_value - state.gold_cost_basis)} on cost" if state.gold_units and equity
+               else f"target {GOLD_WEIGHT_PCT:.0f}% of equity, bought at the next open")),
+        _tile("Cash (liquid fund)", inr(state.cash),
+              f"{cash_pct:.0f}% of equity · {inr(state.cash_income)} earned · {len(state.pending)} order{'s' if len(state.pending) != 1 else ''} for next open"),
         _tile("Win rate", f"{win_rate:.0f}%" if win_rate == win_rate else "—",
               f"avg {avg_r:+.2f}R per trade" if avg_r == avg_r else "no closed trades yet"),
         _tile("Max drawdown", f"{max_dd:.1f}%" if equity_series else "—", f"{len(history)} session{'s' if len(history) != 1 else ''} tracked"),
@@ -543,7 +549,7 @@ def publish_dashboard(html_text: str, docs_dir: str = DOCS_DIR) -> str:
         f.write(html_text)
     data_dir = os.path.join(docs_dir, "data")
     os.makedirs(data_dir, exist_ok=True)
-    for src in (LEDGER_PATH, EQUITY_PATH):
+    for src in (LEDGER_PATH, EQUITY_PATH, GOLD_PATH):
         if os.path.exists(src):
             shutil.copyfile(src, os.path.join(data_dir, os.path.basename(src)))
     logger.info("Dashboard published: %s", path)

@@ -112,7 +112,7 @@ jobs:
 
       # Runs even if the screener step failed (e.g. email) — the report, dashboard
       # and paper-trading files are the product; email is just delivery.
-      # paper_trades.csv / paper_equity.csv are the paper account's ONLY state
+      # paper_trades.csv / paper_gold.csv / paper_equity.csv are the paper account's ONLY state
       # (see modules/paper_trader.py); every run starts from a fresh checkout, so
       # they must be committed back or the account would reset daily.
       - name: Commit + push report, dashboard and paper account
@@ -121,7 +121,7 @@ jobs:
           git config user.name "screener-bot"
           git config user.email "actions@github.com"
           git add docs
-          for f in paper_trades.csv paper_equity.csv; do
+          for f in paper_trades.csv paper_gold.csv paper_equity.csv; do
             if [ -f "$f" ]; then git add "$f"; fi
           done
           if ! git diff --cached --quiet; then

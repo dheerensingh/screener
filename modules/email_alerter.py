@@ -97,7 +97,7 @@ def build_summary_email(
         f'<p style="margin:4px 0 0;font-size:24px;font-weight:700">₹{paper.equity:,.0f} '
         f'<span style="font-size:15px;color:{PALETTE["green"] if ret >= 0 else PALETTE["red"]}">{ret:+.2f}%</span></p>'
         f'<p style="margin:2px 0 0;font-size:12px;color:{PALETTE["muted"]}">started ₹{paper.start_capital:,.0f}{bench} · '
-        f'{len(paper.positions)} open · cash ₹{paper.cash:,.0f}</p>'
+        f'{len(paper.positions)} open · gold ₹{paper.gold_value:,.0f} · cash ₹{paper.cash:,.0f}</p>'
     )
 
     orders = _email_table(

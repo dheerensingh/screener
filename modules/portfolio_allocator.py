@@ -68,6 +68,15 @@ DEFAULT_RISK_PCT = 0.75  # used when cap_band is unknown/blank
 # 0.375%). Chosen from the 9-year backtest in STRATEGY.md §17.
 RISK_SCALE = 0.75
 
+# ── Gold slice (2026-10-17, STRATEGY.md §19) ─────────────────────────────────
+# GOLD_WEIGHT_PCT of equity is held in a gold ETF at all times (no trend rule —
+# it tested worse), brought back to target on the first run of each month when it
+# has drifted more than GOLD_REBALANCE_BAND_PCT of equity. Gold counts toward the
+# 85% capital cap. Idle cash earns a liquid-fund yield (modules/cash_yield.py).
+GOLD_TICKER = "GOLDBEES"  # Nippon India Gold BeES on NSE
+GOLD_WEIGHT_PCT = 10.0
+GOLD_REBALANCE_BAND_PCT = 2.0
+
 
 @dataclass
 class Holding:
