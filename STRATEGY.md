@@ -1116,5 +1116,11 @@ Return by calendar year (%):
 - **Gold costs stock exposure.** It counts against the 85% capital cap, so the
   book holds fewer stocks (9.5 → 7.9 at 20%) and the strategy's own trades
   contribute less.
-- **Gold is not yet in the paper account** — the liquid fund is; gold waits on
-  the user's choice of share.
+- **Adopted: 10% gold, always held** (user's decision, 2026-10-17), in the
+  paper account from the 2026-10-19 run. `portfolio_allocator.GOLD_WEIGHT_PCT`
+  = 10, `GOLD_REBALANCE_BAND_PCT` = 2: `paper_trader.plan_gold()` books a buy on
+  the first run, then on the first run of each month brings gold back to 10%
+  if it has drifted more than 2% of equity; orders fill at the next open, after
+  stock orders, within the cash left (ledger `paper_gold.csv`, 0.05% per side).
+  Gold counts toward the 85% capital cap. `BacktestConfig`'s defaults now equal
+  this live setup (liquid fund on, gold 10% always).

@@ -448,7 +448,7 @@ trade split and a calendar-year return table. No live rule changed. Also fixed: 
 simulator's allocation loop reused `i`, the day index the drawdown circuit breaker
 reads (only matters with `apply_drawdown_circuit_breaker=True`).
 
-## Task 12 (2026-10-17): idle cash in a liquid fund; gold slice tested
+## Task 12 (2026-10-17): idle cash in a liquid fund; 10% gold slice
 
 **STRATEGY.md §19 is the canonical reference.** Module map only:
 
@@ -458,9 +458,21 @@ reads (only matters with `apply_drawdown_circuit_breaker=True`).
   credits it on the last earlier snapshot's cash (`_accrue_cash_income`, so a
   re-run never double-credits); the running total is `paper_equity.csv`'s
   `cash_income` column and is part of `cash`. Dashboard cash tile shows it.
-- **`backtest/simulator.py`** — `BacktestConfig.idle_cash_yield`, `gold_weight_pct`,
-  `gold_trend` ("always" / "sma200" / "12m"); `run_backtest(gold=...)`. Gold is
-  marked into `cash` daily, rebalanced monthly, and counts toward the capital cap.
+- **Gold, 10% of equity, always held** (live from 2026-10-19):
+  `portfolio_allocator.GOLD_TICKER/GOLD_WEIGHT_PCT/GOLD_REBALANCE_BAND_PCT`.
+  `paper_trader.plan_gold()` (called by `main.py` right after `update()`, before
+  sizing stocks) books a buy on the first run and a monthly rebalance when gold is
+  >2% of equity off target; it fills at the next open after the stock orders.
+  Ledger: **`paper_gold.csv`** (committed by `schedule.yml` with the other paper
+  files); cash subtracts its net spend; `exposure_pct()` counts gold toward the
+  capital cap; a >15% one-day gold move is treated as a bad Yahoo bar and ignored.
+  Dashboard has a gold tile; the email shows gold value.
+- **`backtest/simulator.py`** — `BacktestConfig.idle_cash_yield` (default True),
+  `gold_weight_pct` (default 10), `gold_trend` ("always" default / "sma200" / "12m");
+  `run_backtest(gold=...)` (without the series, gold is skipped). Gold is marked into
+  `cash` daily, rebalanced monthly, and counts toward the capital cap.
+  `run_portfolio_backtest.py`'s `BASE` turns both off ("stock rules only", what
+  §17/§18 measured); `LIVE` is the defaults.
 - **`backtest/data_cache.py`** — `fetch_gold()` (GOLDBEES.NS, cached, cleaned by
   `_clean_gold`: Yahoo had two bars at 1/100 price in Dec 2019) and
   `fetch_gold_reference()` (COMEX gold × USD/INR, a cross-check only).

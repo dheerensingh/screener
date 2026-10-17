@@ -252,6 +252,8 @@ def main() -> int:
         sector_qualifiers = {sector: [r for r in rs if r.ticker not in stale]
                              for sector, rs in sector_qualifiers.items()}
 
+        trader.plan_gold()  # before sizing stocks, so a gold buy counts toward the capital cap
+
         logger.info("Step 3c: Allocating new orders around current holdings ...")
         deployed_pct, heat_pct = trader.exposure_pct(account_size)
         allocation = allocate_portfolio(

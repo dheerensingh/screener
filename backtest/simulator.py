@@ -37,7 +37,8 @@ import numpy as np
 import pandas as pd
 
 from modules.portfolio_allocator import (
-    CAP_BAND_RISK_PCT, MAX_DEPLOYED_CAPITAL_PCT, MAX_PORTFOLIO_HEAT_PCT, MAX_TOTAL_POSITIONS,
+    CAP_BAND_RISK_PCT, GOLD_REBALANCE_BAND_PCT, GOLD_WEIGHT_PCT, MAX_DEPLOYED_CAPITAL_PCT,
+    MAX_PORTFOLIO_HEAT_PCT, MAX_TOTAL_POSITIONS,
     RISK_SCALE, Holding, add_blocker, add_risk_fraction, sector_slots,
 )
 from modules.cash_yield import interest as cash_interest
@@ -106,10 +107,11 @@ class BacktestConfig:
     reentry_cooldown_days: int = 0       # sessions a stock is barred after a losing exit
     max_small_cap_heat_pct: Optional[float] = None  # cap on the risk carried by small caps, % of capital
     regime_down_risk_scale: float = 1.0  # risk multiplier for entries decided while the market regime is down
-    # Money outside the swing book (STRATEGY.md §19). Needs run_backtest(gold=...) for the gold slice.
-    idle_cash_yield: bool = False        # idle cash earns modules/cash_yield.py's liquid-fund rate
-    gold_weight_pct: float = 0.0         # % of equity held in a gold ETF, rebalanced monthly
-    gold_trend: GoldTrend = "sma200"     # hold gold only when "sma200": above its 200-day SMA | "12m": up over 12 months
+    # Money outside the swing book (STRATEGY.md §19; live from 2026-10-19). The gold slice
+    # needs run_backtest(gold=...); without that series it is skipped.
+    idle_cash_yield: bool = True         # idle cash earns modules/cash_yield.py's liquid-fund rate
+    gold_weight_pct: float = GOLD_WEIGHT_PCT  # % of equity held in a gold ETF, rebalanced monthly
+    gold_trend: GoldTrend = "always"     # or hold gold only when "sma200": above its 200-day SMA | "12m": up over 12 months
 
 
 @dataclass
@@ -633,7 +635,7 @@ def run_backtest(
             if new_month or (gold_units and not gold_on.get(day, False)):
                 target = equity * config.gold_weight_pct / 100.0 if gold_on.get(day, False) else 0.0
                 traded = abs(target - gold_units * gold_px)
-                if traded > 0.02 * equity or target == 0.0:
+                if traded > GOLD_REBALANCE_BAND_PCT / 100.0 * equity or target == 0.0:
                     cash -= traded * TRANSACTION_COST_PCT / 200.0  # one side
                     equity -= traded * TRANSACTION_COST_PCT / 200.0
                     gold_units = target / gold_px

@@ -32,14 +32,15 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(na
                     handlers=[logging.StreamHandler(sys.stdout)])
 logger = logging.getLogger("backtest.portfolio")
 
-BASE = BacktestConfig(entry_paradigm="trend_template", exit_paradigm="trailing")  # = live settings
+LIVE = BacktestConfig(entry_paradigm="trend_template", exit_paradigm="trailing")  # = live settings (§19: liquid + gold 10%)
+BASE = replace(LIVE, idle_cash_yield=False, gold_weight_pct=0.0)  # stock rules only — what §17/§18 measured
 OLD = replace(BASE, weighted_sector_slots=False, max_total_positions=8, allow_pyramiding=False, risk_scale=1.0)
 FIX_A = dict(stop_rule="atr")
 FIX_B = dict(add_min_open_r=1.0)
 FIX_C = dict(reentry_cooldown_days=10)
 FIX_D = dict(max_small_cap_heat_pct=4.0, regime_down_risk_scale=0.5)
 FIXES = [
-    ("Live rules", BASE),
+    ("Stock rules only", BASE),
     ("Old: 2/sector, max 8, no adds", OLD),
     ("A1 Stop = full 2xATR (fewer shares)", replace(BASE, **FIX_A)),
     ("A2 Skip stocks with 2xATR > 8%", replace(BASE, stop_rule="skip_wide")),
@@ -53,22 +54,22 @@ FIXES = [
     ("B1+D1", replace(BASE, **FIX_B, max_small_cap_heat_pct=4.0)),
     ("B1+D1+D2", replace(BASE, **FIX_B, **FIX_D)),
 ]
-LIQ = replace(BASE, idle_cash_yield=True)
+LIQ = replace(BASE, idle_cash_yield=True)  # gold_trend defaults to "always"
 CASH_GOLD = [
-    ("Live rules (idle cash earns nothing)", BASE),
+    ("Stock rules only, idle cash earns nothing", BASE),
     ("+ liquid fund on idle cash", LIQ),
-    ("+ liquid + gold 10%, always", replace(LIQ, gold_weight_pct=10.0, gold_trend="always")),
-    ("+ liquid + gold 10% above 200-DMA", replace(LIQ, gold_weight_pct=10.0)),
-    ("+ liquid + gold 20%, always", replace(LIQ, gold_weight_pct=20.0, gold_trend="always")),
-    ("+ liquid + gold 20% above 200-DMA", replace(LIQ, gold_weight_pct=20.0)),
+    ("+ liquid + gold 10%, always (live)", LIVE),
+    ("+ liquid + gold 10% above 200-DMA", replace(LIQ, gold_weight_pct=10.0, gold_trend="sma200")),
+    ("+ liquid + gold 20%, always", replace(LIQ, gold_weight_pct=20.0)),
+    ("+ liquid + gold 20% above 200-DMA", replace(LIQ, gold_weight_pct=20.0, gold_trend="sma200")),
     ("+ liquid + gold 20% up over 12 months", replace(LIQ, gold_weight_pct=20.0, gold_trend="12m")),
-    ("+ liquid + gold 30% above 200-DMA", replace(LIQ, gold_weight_pct=30.0)),
+    ("+ liquid + gold 30% above 200-DMA", replace(LIQ, gold_weight_pct=30.0, gold_trend="sma200")),
 ]
 SUITES = {
     # suite -> (variants, variants in the year-by-year table, show the per-condition trade split)
-    "fixes": (FIXES, ("Live rules", "Old: 2/sector, max 8, no adds", "B1+D1"), True),
-    "cash_gold": (CASH_GOLD, ("Live rules (idle cash earns nothing)", "+ liquid fund on idle cash",
-                              "+ liquid + gold 20% above 200-DMA"), False),
+    "fixes": (FIXES, ("Stock rules only", "Old: 2/sector, max 8, no adds", "B1+D1"), True),
+    "cash_gold": (CASH_GOLD, ("Stock rules only, idle cash earns nothing", "+ liquid fund on idle cash",
+                              "+ liquid + gold 10%, always (live)"), False),
 }
 
 
@@ -103,7 +104,7 @@ def _breakdown(trades) -> list[str]:
     first = [t for t in trades if not t.is_add]
     adds = [t for t in trades if t.is_add]
     return [
-        "", "#### Live rules: trades split by condition", "",
+        "", "#### Stock rules: trades split by condition", "",
         "| Group | Trades | Win % | Avg R | P&L ₹ |", "|---|---|---|---|---|",
         _group("All trades", trades),
         _group("Stop at the 8% cap (2xATR wider)", [t for t in trades if t.stop_capped]),
