@@ -48,7 +48,10 @@ VARIANTS = [
     ("D2 Half risk when market is down", replace(BASE, regime_down_risk_scale=0.5)),
     ("A1+B1+C", replace(BASE, **FIX_A, **FIX_B, **FIX_C)),
     ("A1+B1+C+D1+D2", replace(BASE, **FIX_A, **FIX_B, **FIX_C, **FIX_D)),
+    ("B1+D1", replace(BASE, **FIX_B, max_small_cap_heat_pct=4.0)),
+    ("B1+D1+D2", replace(BASE, **FIX_B, **FIX_D)),
 ]
+YEARLY = ("Live rules", "Old: 2/sector, max 8, no adds", "B1+D1")  # variants in the year-by-year table
 
 
 def _avg_names_held(trades, equity: pd.Series) -> float:
@@ -97,6 +100,22 @@ def _breakdown(trades) -> list[str]:
     ]
 
 
+def _yearly_table(curves: dict[str, pd.Series], bench: pd.Series) -> list[str]:
+    """Calendar-year % return of each equity curve next to Nifty500's."""
+    curves = {**curves, "Nifty500": bench}
+    years = sorted({d.year for d in bench.index})
+    lines = ["", "#### Return by calendar year (%)", "",
+             "| Year | " + " | ".join(curves) + " |", "|---" * (len(curves) + 1) + "|"]
+    for y in years:
+        cells = []
+        for c in curves.values():
+            prev, cur = c[c.index.year < y], c[c.index.year == y]
+            start = prev.iloc[-1] if len(prev) else (cur.iloc[0] if len(cur) else float("nan"))
+            cells.append(f"{(cur.iloc[-1] / start - 1) * 100:+.1f}" if len(cur) else "")
+        lines.append(f"| {y} | " + " | ".join(cells) + " |")
+    return lines
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--period", default="10y")
@@ -111,6 +130,7 @@ def main() -> int:
     rows = []
     window = None
     breakdown: list[str] = []
+    yearly: dict[str, pd.Series] = {}
     for name, cfg in VARIANTS:
         logger.info("Running: %s", name)
         trades, equity = run_backtest(universe_data, benchmark, sector_by_ticker, cap_band_by_ticker, cfg)
@@ -124,6 +144,8 @@ def main() -> int:
                      m.cagr_pct / abs(m.max_drawdown_pct) if m.max_drawdown_pct else 0.0))
         if cfg is BASE:
             breakdown = _breakdown(trades)
+        if name in YEARLY:
+            yearly[name] = equity
 
     bench = benchmark.dropna()
     bench = bench[(bench.index >= window[0]) & (bench.index <= window[1])]
@@ -144,6 +166,7 @@ def main() -> int:
     lines.append(f"| *Nifty500 buy & hold* | | | | | | | {bh_cagr:+.1f} | {bh_cagr3:+.1f} | {bh_dd:.1f} | {bh_sharpe:.2f} | "
                  f"{bh_cagr / abs(bh_dd) if bh_dd else 0:.2f} |")
     lines += breakdown
+    lines += _yearly_table(yearly, bench)
     text = "\n".join(lines)
     print(text)
     summary = os.environ.get("GITHUB_STEP_SUMMARY")
