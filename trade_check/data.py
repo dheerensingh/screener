@@ -61,6 +61,8 @@ def fetch(inst: Instrument, period: str = "10y", use_cache: bool = True) -> pd.D
     if raw is None or raw.empty:
         raise RuntimeError(f"yfinance returned no data for {inst.yahoo}")
     df = drop_unsettled_bar(_clean(raw), inst)
+    if df.empty:
+        raise RuntimeError(f"yfinance returned no usable bars for {inst.yahoo}")
     df.to_parquet(path)
     logger.info("%s (%s): %d bars, %s → %s", inst.key, inst.yahoo, len(df),
                 df.index[0].date(), df.index[-1].date())

@@ -60,10 +60,10 @@ class Instrument:
 #   trails the spot index by ≈ (interest − dividend yield) ≈ 6%/year.
 #   BTC perpetual (Delta Exchange India): 0.05% taker + 18% GST ≈ 0.059%, plus
 #   0.03% slippage. Funding ≈ 10%/year paid by longs in a normal market.
+# FINNIFTY (lot 60) was dropped: Yahoo's NIFTY_FIN_SERVICE.NS returns no bars.
 INSTRUMENTS: dict[str, Instrument] = {i.key: i for i in [
     Instrument("NIFTY", "^NSEI", "index_future", 65, 0.04, 6.0),
     Instrument("BANKNIFTY", "^NSEBANK", "index_future", 30, 0.04, 6.0),
-    Instrument("FINNIFTY", "NIFTY_FIN_SERVICE.NS", "index_future", 60, 0.04, 6.0),
     Instrument("RELIANCE", "RELIANCE.NS", "stock_future", None, 0.06, 6.0),
     Instrument("HDFCBANK", "HDFCBANK.NS", "stock_future", None, 0.06, 6.0),
     Instrument("ICICIBANK", "ICICIBANK.NS", "stock_future", None, 0.06, 6.0),

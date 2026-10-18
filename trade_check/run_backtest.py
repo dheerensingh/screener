@@ -69,11 +69,11 @@ def _min_account_for_one_lot(df: pd.DataFrame, inst: Instrument) -> float:
     return max(risk_rule, notional_rule)
 
 
-def _now(df: pd.DataFrame, params: Params) -> str:
+def _now(df: pd.DataFrame, inst: Instrument, params: Params) -> str:
     b = add_indicators(df)
     d = direction(b, params.trend_filter, params.allow_short)
     atr_pct = b["ATR"].iloc[-1] / b["Close"].iloc[-1] * 100
-    yr = (b["Close"].iloc[-1] / b["Close"].iloc[-min(len(b), 252)] - 1) * 100
+    yr = (b["Close"].iloc[-1] / b["Close"].iloc[-min(len(b), 365 if inst.trades_weekends else 252)] - 1) * 100
     return f"{d or 'flat'}; ATR {atr_pct:.1f}%; 1y {yr:+.0f}%"
 
 
@@ -111,7 +111,7 @@ def run_instrument(inst: Instrument, period: str, use_cache: bool) -> tuple[dict
         "best": best.label(), "best_row": best_row, "default_row": default_row,
         "bh_test": _buy_hold(df, split, hi), "bh_full": _buy_hold(df, lo, hi),
         "lots": lots_full, "too_big": too_big, "sessions": sessions,
-        "min_account": _min_account_for_one_lot(df, inst), "now": _now(df, best),
+        "min_account": _min_account_for_one_lot(df, inst), "now": _now(df, inst, best),
     }
     return row, grid
 
