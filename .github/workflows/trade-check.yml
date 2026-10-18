@@ -1,0 +1,63 @@
+name: Trade Check
+
+# The separate trade_check/ tool (see trade_check/README.md). Read-only: it
+# never commits or pushes anything; results are in the run's summary page and
+# its "trade-check-output" artifact. No schedule.
+on:
+  workflow_dispatch:
+    inputs:
+      job:
+        description: "backtest (compare instruments) or check (daily check + paper account)"
+        type: choice
+        options: [backtest, check]
+        default: backtest
+      instrument:
+        description: "check only: instrument key from trade_check/config.py (e.g. BTC, NIFTY)"
+        default: BTC
+      paper_start:
+        description: "check only: paper account start date, YYYY-MM-DD (blank = 90 days ago)"
+        default: ""
+      extra_args:
+        description: "extra flags, e.g. --only NIFTY,BTC (backtest) or --long-only --trend sma200 (check)"
+        default: ""
+  push:
+    branches-ignore: [main]
+    paths:
+      - "trade_check/**"
+      - ".github/workflows/trade-check.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  trade-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+      - run: pip install --upgrade pip && pip install -r requirements.txt pytest
+      - run: python -m pytest -q trade_check/tests
+      - name: Backtest
+        if: github.event_name == 'push' || inputs.job == 'backtest'
+        env:
+          EXTRA_ARGS: ${{ inputs.extra_args }}
+        run: python -m trade_check.run_backtest $EXTRA_ARGS
+      - name: Daily check
+        if: github.event_name == 'workflow_dispatch' && inputs.job == 'check'
+        env:
+          INSTRUMENT: ${{ inputs.instrument }}
+          PAPER_START: ${{ inputs.paper_start }}
+          EXTRA_ARGS: ${{ inputs.extra_args }}
+        run: |
+          python -m trade_check.check --instrument "$INSTRUMENT" \
+            ${PAPER_START:+--paper-start "$PAPER_START"} $EXTRA_ARGS
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: trade-check-output
+          path: trade_check/output/
+          if-no-files-found: ignore
