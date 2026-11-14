@@ -1151,7 +1151,7 @@ Return by calendar year (%):
   trend-follower re-enters on confirmation, not at the bottom; (3) once fully
   invested, the Pharma/IT/Textiles holdings rose 1.2% while the index rose 4.2%.
 
-**Defects found and fixed (live from the next run):**
+**Defects found (fix 1 live from the next run; fix 2 built, tested and left off):**
 
 1. **Recorded risk overstated actual risk.** `position_sizer.size_position()`
    kept `risk_amount` at the full risk budget when the quantity was capped by the
@@ -1161,17 +1161,39 @@ Return by calendar year (%):
    the budget, and the sizing formula shows both); the paper account's heat uses
    quantity × stop distance, which also corrects rows booked before the fix; the
    backtest does the same.
-2. **Scrap orders.** With capital nearly used up the allocator still booked
-   orders like KOTAKBANK ×1 (₹489) and WELSPUNLIV ×1 (₹250). Now
-   (`portfolio_allocator.order_too_small`): an order is skipped if it is worth
-   under ₹5,000, or if the capital left cuts it to under 50% of its risk budget
-   (the 20% single-stock cap alone never triggers this). The same check runs at
-   the fill against the risk booked with the order, so the three scrap orders
-   booked on 2026-11-13 (ICICIBANK ×6, KOTAKBANK ×1, WELSPUNLIV ×1) are
-   cancelled at their fill. The backtest applies the same floor.
+2. **Scrap orders.** With capital nearly used up the allocator still books
+   orders like KOTAKBANK ×1 (₹489) and WELSPUNLIV ×1 (₹250). A floor was built
+   (`portfolio_allocator.order_too_small`: skip an order worth under
+   `MIN_ORDER_VALUE_INR`, or cut by the capital left to under
+   `MIN_RISK_FILLED_FRACTION` of its risk budget; checked at allocation, at the
+   paper fill and in the backtest) — and **switched off** (both 0), because every
+   version tested made the backtest worse (table below). The small orders are
+   the last of the capital going into qualifying stocks, and over 9 years they
+   added return and spread risk. Caveat for real money: the backtest charges a
+   percentage cost only, so a flat per-order charge (DP fees on a sale) would
+   make scrap orders somewhat worse than it shows.
 
-Neither changes the stock-selection rules; the backtest (run on the PR) shows
-their effect on the 9-year numbers.
+Same-run comparison, 2017-10-23 to 2026-11-13 (GitHub Actions runs 43582975812,
+43583800147; between the two runs the same rows moved by up to 0.1pp CAGR from
+re-fetched data):
+
+| Live setup (liquid + gold 10%) | Trades | CAGR | Max DD | Sharpe | Calmar |
+|---|---|---|---|---|---|
+| **No order floor (live)** | 2,078 | **+15.8%** | **-10.7%** | **1.75** | **1.48** |
+| Heat counted at the risk budget (old accounting) | 2,078 | +15.8% | -10.7% | 1.75 | 1.48 |
+| ₹5k order minimum | 1,750 | +15.1% | -17.7% | 1.50 | 0.85 |
+| ₹10k order minimum | 1,622 | +15.1% | -18.9% | 1.47 | 0.80 |
+| ₹5k + 25% of risk budget | 1,698 | +14.8% | -19.4% | 1.43 | 0.76 |
+| ₹5k + 50% of risk budget | 1,598 | +14.8% | -15.4% | 1.47 | 0.96 |
+| *Nifty500 buy & hold* | | +11.2% | -38.3% | 0.74 | 0.29 |
+
+The heat fix changes nothing in the backtest — there the 85% capital cap always
+binds before the 8% heat cap — but live it stops the heat cap blocking orders on
+an overstated figure. Neither change touches stock selection.
+
+These numbers differ from §19's (+16.1%, -16.0% for the same setup to
+2026-10-16): one more month of data and a fresh download moved max drawdown by
+~5pp, the same path-noise §17 and §18 warned about.
 
 **What Oct 1-22 taught, and what was done with it:**
 

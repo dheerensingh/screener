@@ -487,8 +487,11 @@ reads (only matters with `apply_drawdown_circuit_breaker=True`).
   `portfolio_allocator.allocate()`, `PaperTrader.exposure_pct()` (quantity × stop
   distance, so old ledger rows are right too), the dashboard's pending-order risk and
   `backtest/simulator.py` all use the actual figure.
-- `portfolio_allocator.order_too_small()` (`MIN_ORDER_VALUE_INR` = 5,000,
-  `MIN_RISK_FILLED_FRACTION` = 0.5): skips scrap orders at allocation, at the paper
-  fill (against the risk booked with the order) and in the backtest.
+- `portfolio_allocator.order_too_small()` (`MIN_ORDER_VALUE_INR`,
+  `MIN_RISK_FILLED_FRACTION`): a scrap-order floor checked at allocation, at the paper
+  fill (against the risk booked with the order) and in the backtest
+  (`BacktestConfig.min_order_value` / `min_risk_filled_fraction`). **Both are 0
+  (off)**: every floor tested lowered CAGR and Sharpe (§20).
+  `BacktestConfig.heat_counts_risk_budget=True` reproduces the old heat accounting.
 - Review rules for the paper account are in §20 — no stock-rule change from paper
   results before the 60-trade / 2027-04-01 review.
