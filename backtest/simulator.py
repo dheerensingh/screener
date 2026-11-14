@@ -117,6 +117,7 @@ class BacktestConfig:
     # to under this fraction of their risk budget. 0 turns each off.
     min_order_value: float = MIN_ORDER_VALUE_INR
     min_risk_filled_fraction: float = MIN_RISK_FILLED_FRACTION
+    heat_counts_risk_budget: bool = False  # True = pre-2026-11-14 accounting: heat adds the full budget, not the risk carried
 
 
 @dataclass
@@ -448,9 +449,10 @@ def run_backtest(
                 )
                 held_now.add(ticker)
                 deployed_pct += (qty * entry_price) / config.account_size * 100.0
-                heat_pct += risk_amount / config.account_size * 100.0
+                counted = intended_risk if config.heat_counts_risk_budget else risk_amount
+                heat_pct += counted / config.account_size * 100.0
                 if cap_band == "Small":
-                    small_heat_pct += risk_amount / config.account_size * 100.0
+                    small_heat_pct += counted / config.account_size * 100.0
 
         pending_entries = []
 

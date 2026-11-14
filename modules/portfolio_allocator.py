@@ -57,13 +57,17 @@ MAX_ADDS_PER_STOCK = 2
 ADD_RISK_FRACTIONS = (0.5, 0.25)  # 1st add, 2nd add — of the stock's cap-band risk
 MIN_SESSIONS_BETWEEN_LOTS = 5
 
-# ── Order size floor (2026-11-14, STRATEGY.md §20) ──────────────────────────
-# When capital runs low the sizer still produced scraps (1 share of KOTAKBANK for
-# ₹489). An order is skipped if it is worth less than MIN_ORDER_VALUE_INR, or if
-# the capital left cuts it to under MIN_RISK_FILLED_FRACTION of its risk budget.
-# The same floor applies when a fill is cut to the cash available.
-MIN_ORDER_VALUE_INR = 5_000.0
-MIN_RISK_FILLED_FRACTION = 0.5
+# ── Order size floor (2026-11-14, STRATEGY.md §20) — OFF ─────────────────────
+# When capital runs low the sizer produces scraps (1 share of KOTAKBANK for ₹489).
+# A floor was built to skip them — an order worth under MIN_ORDER_VALUE_INR, or cut
+# by the capital left to under MIN_RISK_FILLED_FRACTION of its risk budget — and
+# backtested: every floor tried (₹5k, ₹10k, 25%, 50%) lowered CAGR and Sharpe, so
+# both are 0 (off). The check stays wired in (allocation, paper fill, backtest) so a
+# floor can be switched back on here. Note for real money: the backtest charges a
+# percentage cost only; a flat per-order charge (e.g. DP fees on a sale) would make
+# scrap orders worse than it shows.
+MIN_ORDER_VALUE_INR = 0.0
+MIN_RISK_FILLED_FRACTION = 0.0
 
 
 def order_too_small(value: float, risk: float, intended_risk: float, cut_by_capital: bool,
