@@ -77,6 +77,8 @@ LOOKBACK_WEIGHTS = {"1M": 0.5, "3M": 0.3, "6M": 0.2}
 EntryParadigm = Literal["trend_template", "rsi_macd_only", "vcp_breakout"]
 ExitParadigm = Literal["trailing", "fixed_target", "scale_out"]
 GoldTrend = Literal["always", "sma200", "12m"]
+PickMode = Literal["strength", "random_qualifier", "random_member"]
+SectorMode = Literal["top", "random"]
 StopRule = Literal["cap", "atr", "skip_wide"]
 
 
@@ -118,6 +120,13 @@ class BacktestConfig:
     min_order_value: float = MIN_ORDER_VALUE_INR
     min_risk_filled_fraction: float = MIN_RISK_FILLED_FRACTION
     heat_counts_risk_budget: bool = False  # True = pre-2026-11-14 accounting: heat adds the full budget, not the risk carried
+    # Edge tests (STRATEGY.md §21) — is the selection better than chance? Defaults = live.
+    pick_mode: PickMode = "strength"     # "random_qualifier": qualifiers in random order | "random_member":
+                                         # any liquid sector member with RSI >= 45 (no screen), random order
+    sector_mode: SectorMode = "top"      # "random": TOP_N_SECTORS random sectors, redrawn every sector_redraw_days
+    sector_redraw_days: int = 21
+    random_seed: int = 0
+    max_entry_rsi: Optional[float] = None  # skip qualifiers whose RSI is above this
 
 
 @dataclass
@@ -138,6 +147,7 @@ class Trade:
     stop_capped: bool = False         # 2xATR was wider than the 8% cap
     reentry_after_loss: bool = False  # bought within 10 sessions of a losing exit in the same stock
     add_open_r: float = float("nan")  # for an add: the first lot's open profit in R when the add was decided
+    rsi_at_signal: float = float("nan")  # RSI(14) on the signal day
 
 
 @dataclass
@@ -157,6 +167,7 @@ class OpenPosition:
     stop_capped: bool = False
     reentry_after_loss: bool = False
     add_open_r: float = float("nan")
+    rsi_at_signal: float = float("nan")
 
 
 def _per_ticker_signals(ticker: str, df: pd.DataFrame) -> Optional[pd.DataFrame]:
@@ -349,6 +360,8 @@ def run_backtest(
     pending_risk_mult = 1.0  # config.regime_down_risk_scale when the entries were decided in a down regime
     last_loss_exit: dict[str, int] = {}  # ticker -> trading_days index of its latest losing exit
     lot_seq = 0  # open_positions is keyed by lot ("TICKER#n"): an add to a winner is its own lot
+    rng = np.random.default_rng(config.random_seed)  # only used by the random edge-test modes
+    random_sectors: list[str] = []
     equity_peak = config.account_size
     entries_halted = False  # strategy-level drawdown circuit breaker state
     halted_since_idx: Optional[int] = None  # trading_days index when the halt started, for the cooldown timer
@@ -446,6 +459,7 @@ def run_backtest(
                     is_add=is_add, stop_capped=stop_capped,
                     reentry_after_loss=ticker in last_loss_exit and i - last_loss_exit[ticker] <= 10,
                     add_open_r=add_open_r,
+                    rsi_at_signal=float(sig["rsi"].iloc[sig.index.get_loc(day) - 1]) if sig.index.get_loc(day) > 0 else float("nan"),
                 )
                 held_now.add(ticker)
                 deployed_pct += (qty * entry_price) / config.account_size * 100.0
@@ -498,6 +512,7 @@ def run_backtest(
                     pnl_rupees=pnl, r_multiple=pnl / pos.risk_amount if pos.risk_amount else 0.0,
                     is_add=pos.is_add, stop_capped=pos.stop_capped,
                     reentry_after_loss=pos.reentry_after_loss, add_open_r=pos.add_open_r,
+                    rsi_at_signal=pos.rsi_at_signal,
                 ))
                 if pnl < 0:
                     last_loss_exit[ticker] = i
@@ -547,6 +562,11 @@ def run_backtest(
                     today_sector_scores[sector] = sum(rs[k] * LOOKBACK_WEIGHTS[k] for k in rs) / wsum
 
             leading = sorted(today_sector_scores, key=today_sector_scores.get, reverse=True)[:TOP_N_SECTORS]
+            if config.sector_mode == "random":
+                if not random_sectors or i % config.sector_redraw_days == 0:
+                    pool = sorted(today_sector_scores)
+                    random_sectors = list(rng.choice(pool, size=min(TOP_N_SECTORS, len(pool)), replace=False))
+                leading = [s for s in random_sectors if s in today_sector_scores]
 
             holdings = _holdings(open_positions, signals, trading_days, day)
             candidates_by_sector: dict[str, list[tuple[str, float]]] = {}
@@ -571,6 +591,13 @@ def run_backtest(
                     if config.require_delivery_above_median and not bool(row["delivery_above_own_median"]):
                         continue
 
+                    if config.pick_mode == "random_member":
+                        # Null test: no screen at all, just a liquid member of the sector not already
+                        # in RSI-failure territory (which the exit rule would sell at the next open).
+                        if row["rsi"] != row["rsi"] or row["rsi"] < RSI_FAILURE_FLOOR:
+                            continue
+                        cands.append((ticker, float(rng.random())))
+                        continue
                     if config.entry_paradigm == "vcp_breakout":
                         # Structural gate (Trend Template + RS Rating) still required — VCP is a
                         # consolidation *within* an existing uptrend, not a standalone signal —
@@ -591,7 +618,11 @@ def run_backtest(
                             rs_today = _cross_sectional_rank(signals, day, ticker)
                             if rs_today is None or rs_today < RS_RATING_THRESHOLD:
                                 continue
+                        if config.max_entry_rsi is not None and row["rsi"] > config.max_entry_rsi:
+                            continue
                         strength = row["rsi"] / 100.0
+                    if config.pick_mode == "random_qualifier":
+                        strength = float(rng.random())
                     cands.append((ticker, strength))
                 cands.sort(key=lambda x: x[1], reverse=True)
                 candidates_by_sector[sector] = cands

@@ -22,6 +22,7 @@ from dataclasses import replace
 
 import pandas as pd
 
+from modules.benchmark import total_return_index
 from modules.sector_mapper import build_universe
 
 from .data_cache import GOLD_FIXES, GOLD_TICKER, fetch_and_cache, fetch_gold, fetch_gold_reference
@@ -176,6 +177,7 @@ def main() -> int:
     bench = bench[(bench.index >= window[0]) & (bench.index <= window[1])]
     bh_cagr, bh_dd, bh_sharpe = _cagr(bench), _max_drawdown(bench), _sharpe(bench)
     bh_cagr3 = _cagr_since(bench, 3)
+    tri = pd.Series(total_return_index([d.date() for d in bench.index], list(bench.values)), index=bench.index)
     gold_bh = gold.dropna()
     gold_bh = gold_bh[(gold_bh.index >= window[0]) & (gold_bh.index <= window[1])]
 
@@ -192,6 +194,9 @@ def main() -> int:
                      .format(*r))
     lines.append(f"| *Nifty500 buy & hold* | | | | | | | {bh_cagr:+.1f} | {bh_cagr3:+.1f} | {bh_dd:.1f} | {bh_sharpe:.2f} | "
                  f"{bh_cagr / abs(bh_dd) if bh_dd else 0:.2f} |")
+    t_dd = _max_drawdown(tri)
+    lines.append(f"| *Nifty500 TRI, approx. (1.3% dividend yield)* | | | | | | | {_cagr(tri):+.1f} | "
+                 f"{_cagr_since(tri, 3):+.1f} | {t_dd:.1f} | {_sharpe(tri):.2f} | {_cagr(tri) / abs(t_dd) if t_dd else 0:.2f} |")
     if args.suite == "cash_gold" and len(gold_bh) > 1:
         g_cagr, g_dd = _cagr(gold_bh), _max_drawdown(gold_bh)
         lines.append(f"| *Gold ({GOLD_TICKER}) buy & hold* | | | | | | | {g_cagr:+.1f} | {_cagr_since(gold_bh, 3):+.1f} | "
