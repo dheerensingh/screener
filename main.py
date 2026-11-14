@@ -295,7 +295,12 @@ def main() -> int:
 
         bench = rotation.benchmark.dropna()
         bench_close = float(bench.loc[:trader.as_of].iloc[-1]) if trader.as_of else float(bench.iloc[-1])
-        trader.snapshot(bench_close)
+        try:  # dividend yield for the Total Return benchmark (modules/benchmark.py); optional
+            bench_dy = nse_eod.index_div_yield(datetime.strptime(trader.as_of, "%Y-%m-%d").date()) if trader.as_of else None
+        except Exception as e:
+            logger.warning("Nifty500 dividend yield unavailable: %s", e)
+            bench_dy = None
+        trader.snapshot(bench_close, bench_dy)
         trader.save()
         # The workflow's skip-guard compares this to the latest completed session,
         # so a run whose data came back stale is retried by the next backup slot.

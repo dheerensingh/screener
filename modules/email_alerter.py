@@ -24,6 +24,8 @@ from email.mime.text import MIMEText
 from html import escape
 from typing import Optional
 
+from .benchmark import history_tri
+
 logger = logging.getLogger(__name__)
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -91,8 +93,8 @@ def build_summary_email(
     ret = (paper.equity / paper.start_capital - 1.0) * 100.0 if paper.start_capital else 0.0
     bench = ""
     if len(history) >= 2:
-        b0, b1 = float(history[0]["benchmark_close"]), float(history[-1]["benchmark_close"])
-        bench = f" · Nifty500 {(b1 / b0 - 1.0) * 100.0:+.2f}% over the same period" if b0 else ""
+        tri = history_tri(history)
+        bench = f" · Nifty500 TRI {(tri[-1] / tri[0] - 1.0) * 100.0:+.2f}% over the same period" if tri[0] else ""
     summary = (
         f'<p style="margin:4px 0 0;font-size:24px;font-weight:700">₹{paper.equity:,.0f} '
         f'<span style="font-size:15px;color:{PALETTE["green"] if ret >= 0 else PALETTE["red"]}">{ret:+.2f}%</span></p>'
