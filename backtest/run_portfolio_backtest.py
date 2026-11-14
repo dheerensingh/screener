@@ -57,8 +57,13 @@ FIXES = [
 LIQ = replace(BASE, idle_cash_yield=True)  # gold_trend defaults to "always"
 CASH_GOLD = [
     ("Stock rules only, idle cash earns nothing", BASE),
+    ("  stock rules only, no order floor", replace(BASE, min_order_value=0.0, min_risk_filled_fraction=0.0)),
     ("+ liquid fund on idle cash", LIQ),
     ("+ liquid + gold 10%, always (live)", LIVE),
+    ("  live, no order floor", replace(LIVE, min_order_value=0.0, min_risk_filled_fraction=0.0)),
+    ("  live, ₹5k minimum only", replace(LIVE, min_risk_filled_fraction=0.0)),
+    ("  live, ₹10k minimum only", replace(LIVE, min_order_value=10_000.0, min_risk_filled_fraction=0.0)),
+    ("  live, ₹5k + 25% of risk budget", replace(LIVE, min_risk_filled_fraction=0.25)),
     ("+ liquid + gold 10% above 200-DMA", replace(LIQ, gold_weight_pct=10.0, gold_trend="sma200")),
     ("+ liquid + gold 20%, always", replace(LIQ, gold_weight_pct=20.0)),
     ("+ liquid + gold 20% above 200-DMA", replace(LIQ, gold_weight_pct=20.0, gold_trend="sma200")),

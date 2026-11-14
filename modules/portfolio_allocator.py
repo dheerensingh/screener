@@ -66,13 +66,15 @@ MIN_ORDER_VALUE_INR = 5_000.0
 MIN_RISK_FILLED_FRACTION = 0.5
 
 
-def order_too_small(value: float, risk: float, intended_risk: float, cut_by_capital: bool) -> Optional[str]:
+def order_too_small(value: float, risk: float, intended_risk: float, cut_by_capital: bool,
+                    min_value: float = MIN_ORDER_VALUE_INR,
+                    min_fraction: float = MIN_RISK_FILLED_FRACTION) -> Optional[str]:
     """None if the order is worth placing, else why not."""
-    if value < MIN_ORDER_VALUE_INR:
-        return f"Order would be only ₹{value:,.0f} (minimum ₹{MIN_ORDER_VALUE_INR:,.0f})"
-    if cut_by_capital and intended_risk > 0 and risk < MIN_RISK_FILLED_FRACTION * intended_risk:
+    if value < min_value:
+        return f"Order would be only ₹{value:,.0f} (minimum ₹{min_value:,.0f})"
+    if cut_by_capital and intended_risk > 0 and risk < min_fraction * intended_risk:
         return (f"Capital left would cut it to ₹{risk:,.0f} of its ₹{intended_risk:,.0f} risk "
-                f"(under {MIN_RISK_FILLED_FRACTION:.0%})")
+                f"(under {min_fraction:.0%})")
     return None
 
 

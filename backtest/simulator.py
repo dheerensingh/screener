@@ -38,6 +38,7 @@ import pandas as pd
 
 from modules.portfolio_allocator import (
     CAP_BAND_RISK_PCT, GOLD_REBALANCE_BAND_PCT, GOLD_WEIGHT_PCT, MAX_DEPLOYED_CAPITAL_PCT,
+    MIN_ORDER_VALUE_INR, MIN_RISK_FILLED_FRACTION,
     MAX_PORTFOLIO_HEAT_PCT, MAX_TOTAL_POSITIONS,
     RISK_SCALE, Holding, add_blocker, add_risk_fraction, order_too_small, sector_slots,
 )
@@ -112,6 +113,10 @@ class BacktestConfig:
     idle_cash_yield: bool = True         # idle cash earns modules/cash_yield.py's liquid-fund rate
     gold_weight_pct: float = GOLD_WEIGHT_PCT  # % of equity held in a gold ETF, rebalanced monthly
     gold_trend: GoldTrend = "always"     # or hold gold only when "sma200": above its 200-day SMA | "12m": up over 12 months
+    # Order floor (STRATEGY.md §20): skip orders worth less than this, or cut by the capital left
+    # to under this fraction of their risk budget. 0 turns each off.
+    min_order_value: float = MIN_ORDER_VALUE_INR
+    min_risk_filled_fraction: float = MIN_RISK_FILLED_FRACTION
 
 
 @dataclass
@@ -428,7 +433,8 @@ def run_backtest(
                 # Same floor and same "risk actually carried" as the live allocator (STRATEGY.md §20).
                 risk_amount = qty * stop_dist
                 if order_too_small(qty * entry_price, risk_amount, intended_risk,
-                                   cut_by_capital=capped and remaining_capital_pct < max_position_pct):
+                                   cut_by_capital=capped and remaining_capital_pct < max_position_pct,
+                                   min_value=config.min_order_value, min_fraction=config.min_risk_filled_fraction):
                     continue
 
                 lot_seq += 1
