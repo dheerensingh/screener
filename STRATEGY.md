@@ -1124,3 +1124,76 @@ Return by calendar year (%):
   stock orders, within the cash left (ledger `paper_gold.csv`, 0.05% per side).
   Gold counts toward the 85% capital cap. `BacktestConfig`'s defaults now equal
   this live setup (liquid fund on, gold 10% always).
+
+## 20. Six-week paper review, two sizing defects fixed (2026-11-14)
+
+**Paper account, 2026-10-01 to 2026-11-13** (₹5,00,000 start):
+
+| Window | Portfolio | Nifty500 | Avg invested |
+|---|---|---|---|
+| Oct 1 → Nov 13 | -3.0% (₹4,84,807) | +8.6% | ~60% |
+| Oct 1 → Oct 22 | -5.4% | -0.7% | ~50% |
+| Oct 22 → Nov 13 | +2.5% | +9.4% | 66% (18% on Oct 26) |
+| Nov 4 → Nov 13 (fully invested) | +1.2% | +4.2% | ~88% |
+
+- 25 closed trades, 1 winner (+₹169), -₹37,992, avg -0.92R. 23 of 25 were
+  small caps; 7 were adds, all lost. Losses came in clusters (7 lots stopped on
+  Oct 15, 10 on Oct 21-23), so they are ~8-10 independent events, not 25: one
+  win in 9 events at the backtest's ~36% win rate has a ~11% chance. Bad luck
+  in a small-cap correction, not proof of a broken rule.
+- **Two cohorts.** The 24 lots bought Oct 5-19 (small-cap Telecom, Capital
+  Goods, FMCG) are all closed: -₹36,200. The 13 bought from Oct 22 (Pharma, IT,
+  Media, Textiles; more mid/large caps) are +₹21,000 (DIVISLAB +2.8R, ACUTAAS
+  +2.6R, PVRINOX +2.2R open).
+- **Why Oct 22 → Nov 13 still lagged by ~7pp.** (1) The October cohort's last
+  exits cost -₹10,100 inside the window; (2) the book was 18-30% invested at the
+  Oct 23-26 low and only reached ~88% on Nov 4, after much of the rebound — a
+  trend-follower re-enters on confirmation, not at the bottom; (3) once fully
+  invested, the Pharma/IT/Textiles holdings rose 1.2% while the index rose 4.2%.
+
+**Defects found and fixed (live from the next run):**
+
+1. **Recorded risk overstated actual risk.** `position_sizer.size_position()`
+   kept `risk_amount` at the full risk budget when the quantity was capped by the
+   20% stock cap or the capital left. Portfolio heat read 7.12% when the real
+   risk was 5.17%, so the 8% heat cap blocked orders it should have allowed.
+   `risk_amount` is now quantity × stop distance (`intended_risk_amount` keeps
+   the budget, and the sizing formula shows both); the paper account's heat uses
+   quantity × stop distance, which also corrects rows booked before the fix; the
+   backtest does the same.
+2. **Scrap orders.** With capital nearly used up the allocator still booked
+   orders like KOTAKBANK ×1 (₹489) and WELSPUNLIV ×1 (₹250). Now
+   (`portfolio_allocator.order_too_small`): an order is skipped if it is worth
+   under ₹5,000, or if the capital left cuts it to under 50% of its risk budget
+   (the 20% single-stock cap alone never triggers this). The same check runs at
+   the fill against the risk booked with the order, so the three scrap orders
+   booked on 2026-11-13 (ICICIBANK ×6, KOTAKBANK ×1, WELSPUNLIV ×1) are
+   cancelled at their fill. The backtest applies the same floor.
+
+Neither changes the stock-selection rules; the backtest (run on the PR) shows
+their effect on the 9-year numbers.
+
+**What Oct 1-22 taught, and what was done with it:**
+
+- **Data and operations, not rules, were the first failures** — a stale-data run,
+  a skipped retry, a sector basket broken by missing bars, trade-for-trade stocks
+  missed (Oct 6-10, all fixed, CLAUDE.md Task 10). The feed log since shows Yahoo
+  lacked the latest session at run time on 18 of 27 runs; NSE's bhavcopy filled it
+  each time, so NSE is now effectively the primary source for the newest bar.
+- **The stock-rule fixes the losses suggested were tested and rejected** (§18):
+  the 8% stop cap and quick re-entries both did *better* than average over 9 years.
+- **Adds to winners stay a watch item.** Adds made before the first lot reaches
+  +1R earned +0.06R in the backtest (vs +0.23R); requiring +1R (§18 B1) cut max DD
+  a little but lowered the 3-year CAGR, so not adopted. Re-check at the review below.
+- **Idle cash and diversification** (§19) were the improvements the data did
+  support: liquid fund on idle cash and 10% gold, live from this merge.
+
+**Review rules (set in advance, so the strategy is judged against its own
+backtest, not against a few weeks):**
+
+- Full review at **60 closed trades or 2027-04-01**, whichever comes first:
+  live win rate, avg R, add results and drawdown vs the §17/§19 backtest.
+- Earlier review if the paper account's drawdown from its peak passes **-20%**
+  (the live configuration's backtest max is -16%), or the win rate is under 20%
+  after 40 closed trades.
+- Until then, no stock-rule changes from paper results alone.

@@ -57,6 +57,25 @@ MAX_ADDS_PER_STOCK = 2
 ADD_RISK_FRACTIONS = (0.5, 0.25)  # 1st add, 2nd add — of the stock's cap-band risk
 MIN_SESSIONS_BETWEEN_LOTS = 5
 
+# ── Order size floor (2026-11-14, STRATEGY.md §20) ──────────────────────────
+# When capital runs low the sizer still produced scraps (1 share of KOTAKBANK for
+# ₹489). An order is skipped if it is worth less than MIN_ORDER_VALUE_INR, or if
+# the capital left cuts it to under MIN_RISK_FILLED_FRACTION of its risk budget.
+# The same floor applies when a fill is cut to the cash available.
+MIN_ORDER_VALUE_INR = 5_000.0
+MIN_RISK_FILLED_FRACTION = 0.5
+
+
+def order_too_small(value: float, risk: float, intended_risk: float, cut_by_capital: bool) -> Optional[str]:
+    """None if the order is worth placing, else why not."""
+    if value < MIN_ORDER_VALUE_INR:
+        return f"Order would be only ₹{value:,.0f} (minimum ₹{MIN_ORDER_VALUE_INR:,.0f})"
+    if cut_by_capital and intended_risk > 0 and risk < MIN_RISK_FILLED_FRACTION * intended_risk:
+        return (f"Capital left would cut it to ₹{risk:,.0f} of its ₹{intended_risk:,.0f} risk "
+                f"(under {MIN_RISK_FILLED_FRACTION:.0%})")
+    return None
+
+
 CAP_BAND_RISK_PCT = {
     "Large": 1.0,
     "Mid": 0.75,
@@ -235,6 +254,13 @@ def allocate(
         )
         if pos.error or pos.quantity <= 0:
             result.rejected.append((r, pos.error or "Sized to zero quantity"))
+            continue
+        too_small = order_too_small(
+            pos.allocation_rupees, pos.risk_amount, pos.intended_risk_amount,
+            cut_by_capital=pos.capped_by_max_position and remaining_capital_pct < max_position_pct,
+        )
+        if too_small:
+            result.rejected.append((r, too_small))
             continue
 
         result.accepted.append((r, pos))

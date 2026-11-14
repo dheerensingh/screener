@@ -39,7 +39,7 @@ import pandas as pd
 from modules.portfolio_allocator import (
     CAP_BAND_RISK_PCT, GOLD_REBALANCE_BAND_PCT, GOLD_WEIGHT_PCT, MAX_DEPLOYED_CAPITAL_PCT,
     MAX_PORTFOLIO_HEAT_PCT, MAX_TOTAL_POSITIONS,
-    RISK_SCALE, Holding, add_blocker, add_risk_fraction, sector_slots,
+    RISK_SCALE, Holding, add_blocker, add_risk_fraction, order_too_small, sector_slots,
 )
 from modules.cash_yield import interest as cash_interest
 from modules.position_sizer import DEFAULT_MAX_POSITION_PCT
@@ -417,12 +417,18 @@ def run_backtest(
                 if stop_dist <= 0:
                     continue
 
-                risk_amount = config.account_size * risk_pct / 100.0
-                qty = int(risk_amount / stop_dist)
+                intended_risk = config.account_size * risk_pct / 100.0
+                qty = int(intended_risk / stop_dist)
                 max_alloc = config.account_size * min(max_position_pct, remaining_capital_pct) / 100.0
-                if qty * entry_price > max_alloc:
+                capped = qty * entry_price > max_alloc
+                if capped:
                     qty = int(max_alloc / entry_price)
                 if qty <= 0:
+                    continue
+                # Same floor and same "risk actually carried" as the live allocator (STRATEGY.md §20).
+                risk_amount = qty * stop_dist
+                if order_too_small(qty * entry_price, risk_amount, intended_risk,
+                                   cut_by_capital=capped and remaining_capital_pct < max_position_pct):
                     continue
 
                 lot_seq += 1
@@ -436,9 +442,9 @@ def run_backtest(
                 )
                 held_now.add(ticker)
                 deployed_pct += (qty * entry_price) / config.account_size * 100.0
-                heat_pct += risk_pct
+                heat_pct += risk_amount / config.account_size * 100.0
                 if cap_band == "Small":
-                    small_heat_pct += risk_pct
+                    small_heat_pct += risk_amount / config.account_size * 100.0
 
         pending_entries = []
 

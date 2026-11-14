@@ -209,7 +209,7 @@ def build_dashboard_html(
     pending_rows = [[
         f'<strong>{_e(r["ticker"])}</strong>', _e(r["sector"]), _e(r["signal_date"]),
         inr(float(r["signal_price"]), 2), r["quantity"],
-        inr(float(r["signal_price"]) - float(r["stop_distance"]), 2), inr(float(r["risk_amount"])),
+        inr(float(r["signal_price"]) - float(r["stop_distance"]), 2), inr(int(r["quantity"]) * float(r["stop_distance"])),
         inr(int(r["quantity"]) * float(r["signal_price"])),
     ] for r in state.pending]
     pending_table = _table(

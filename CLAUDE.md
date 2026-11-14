@@ -478,3 +478,17 @@ reads (only matters with `apply_drawdown_circuit_breaker=True`).
   `fetch_gold_reference()` (COMEX gold × USD/INR, a cross-check only).
 - **`run_portfolio_backtest.py --suite cash_gold`** (default) runs §19;
   `--suite fixes` re-runs §18.
+
+## Task 13 (2026-11-14): six-week paper review, sizing defects fixed
+
+**STRATEGY.md §20 is the canonical reference.**
+- `position_sizer.PositionSize.risk_amount` is now the risk actually carried
+  (quantity × stop distance); `intended_risk_amount` is the budget. Heat in
+  `portfolio_allocator.allocate()`, `PaperTrader.exposure_pct()` (quantity × stop
+  distance, so old ledger rows are right too), the dashboard's pending-order risk and
+  `backtest/simulator.py` all use the actual figure.
+- `portfolio_allocator.order_too_small()` (`MIN_ORDER_VALUE_INR` = 5,000,
+  `MIN_RISK_FILLED_FRACTION` = 0.5): skips scrap orders at allocation, at the paper
+  fill (against the risk booked with the order) and in the backtest.
+- Review rules for the paper account are in §20 — no stock-rule change from paper
+  results before the 60-trade / 2027-04-01 review.

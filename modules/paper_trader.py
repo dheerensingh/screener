@@ -52,7 +52,9 @@ from typing import Optional
 import pandas as pd
 
 from .cash_yield import interest as cash_interest
-from .portfolio_allocator import GOLD_REBALANCE_BAND_PCT, GOLD_TICKER, GOLD_WEIGHT_PCT, Holding
+from .portfolio_allocator import (
+    GOLD_REBALANCE_BAND_PCT, GOLD_TICKER, GOLD_WEIGHT_PCT, Holding, order_too_small,
+)
 from .stock_fetcher import fetch_stock_data
 from .technical_analyzer import _rsi, atr as compute_atr
 
@@ -408,12 +410,21 @@ class PaperTrader:
             else:
                 qty = int(row["quantity"])
                 affordable = math.floor(cash / (open_px * (1 + COST_PCT_PER_SIDE / 100.0)))
+                stop_dist = float(row["stop_distance"])
+                # Against the risk booked with the order: a cash cut, or (for orders booked
+                # before 2026-11-14, whose risk_amount was the full budget) a capital cut at booking.
+                fill_qty = max(min(qty, affordable), 0)
+                too_small = order_too_small(fill_qty * open_px, fill_qty * stop_dist, float(row["risk_amount"]),
+                                            cut_by_capital=True)
                 if affordable < qty:
                     qty = affordable
                     row["note"] = "; ".join(filter(None, [row.get("note"), "Quantity reduced to available cash"]))
                 if qty <= 0:
                     row.update(status=CANCELLED, note="Not enough cash")
+                elif too_small:
+                    row.update(status=CANCELLED, note=too_small)
                 else:
+                    row["risk_amount"] = f"{qty * stop_dist:.2f}"
                     buy = qty * open_px
                     cash -= buy + _cost(buy)
                     row.update(
@@ -489,7 +500,9 @@ class PaperTrader:
             int(o["units"]) * float(o["signal_price"]) for o in self.gold_orders if o["status"] == "PENDING"
         )
         open_rows = [r for r in self.ledger if r["status"] == OPEN]
-        heat = sum(float(r["risk_amount"]) for r in open_rows + pending)
+        # Risk actually carried (quantity × stop distance): older rows stored the full risk
+        # budget even when the quantity had been capped (STRATEGY.md §20).
+        heat = sum(int(r["quantity"]) * float(r["stop_distance"]) for r in open_rows + pending)
         return deployed / account_size * 100.0, heat / account_size * 100.0
 
     def book(self, accepted: list, sector_of: dict[str, str], adds: Optional[dict[str, int]] = None) -> None:
