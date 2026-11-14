@@ -85,7 +85,7 @@ LEDGER_FIELDS = [
 ]
 EQUITY_FIELDS = [
     "date", "equity", "cash", "market_value", "realized_pnl", "unrealized_pnl",
-    "open_positions", "pending_orders", "benchmark_close", "cash_income", "gold_value",
+    "open_positions", "pending_orders", "benchmark_close", "cash_income", "gold_value", "benchmark_div_yield",
 ]
 GOLD_FIELDS = ["order_id", "status", "signal_date", "signal_price", "units", "fill_date", "fill_price", "cost", "note"]
 
@@ -140,6 +140,11 @@ class PaperState:
     @property
     def equity(self) -> float:
         return self.cash + self.market_value + self.gold_value
+
+    @property
+    def gold_pnl(self) -> float:
+        """Gold's profit so far: value held plus sale proceeds, minus everything paid in (costs included)."""
+        return self.gold_value - _gold_spend(self.gold_orders)
 
     @property
     def unrealized_pnl(self) -> float:
@@ -531,7 +536,7 @@ class PaperTrader:
             self.ledger.append(row)
             self.booked_today.append(row)
 
-    def snapshot(self, benchmark_close: float) -> None:
+    def snapshot(self, benchmark_close: float, benchmark_div_yield: Optional[float] = None) -> None:
         cash = self._cash()
         market_value = sum(p.market_value for p in self.positions)
         realized = sum(float(r["pnl"]) for r in self.ledger if r["status"] == CLOSED)
@@ -543,6 +548,7 @@ class PaperTrader:
             "pending_orders": str(sum(1 for r in self.ledger if r["status"] == PENDING)),
             "benchmark_close": f"{benchmark_close:.2f}", "cash_income": f"{self.cash_income:.2f}",
             "gold_value": f"{self.gold_value:.2f}",
+            "benchmark_div_yield": f"{benchmark_div_yield:.2f}" if benchmark_div_yield else "",
         }
         self.equity_history = [h for h in self.equity_history if h["date"] != self.as_of] + [row]
         self.equity_history.sort(key=lambda h: h["date"])

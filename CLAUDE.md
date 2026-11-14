@@ -495,3 +495,19 @@ reads (only matters with `apply_drawdown_circuit_breaker=True`).
   `BacktestConfig.heat_counts_risk_budget=True` reproduces the old heat accounting.
 - Review rules for the paper account are in §20 — no stock-rule change from paper
   results before the 60-trade / 2027-04-01 review.
+
+## Task 14 (2026-11-14): beat-Nifty500 plan, phase 0-1
+
+**STRATEGY.md §21 is the canonical reference.**
+- **`modules/benchmark.py`** — Nifty500 Total Return Index rebuilt from the price
+  index and its dividend yield (`nse_eod.index_div_yield`, recorded by `main.py` in
+  `paper_equity.csv`'s `benchmark_div_yield`; 1.3% when unknown). Dashboard and email
+  compare against it; dashboard also shows last-21-session return vs TRI, return by
+  source (stocks / gold / liquid fund) and estimated STCG tax
+  (`dashboard.estimated_trading_tax`, 20.8%).
+- **`backtest/run_edge_test.py`** — real stock rules vs random nulls (random order
+  among qualifiers, random liquid sector members, random sectors) plus RSI ceilings.
+  `BacktestConfig.pick_mode`, `sector_mode`, `sector_redraw_days`, `random_seed`,
+  `max_entry_rsi`; `Trade.rsi_at_signal`. Run by `backtest.yml` after the portfolio
+  backtest. Finding: sector rotation carries the edge; the stock screen does not beat
+  random sector members in this (survivorship-biased) universe.

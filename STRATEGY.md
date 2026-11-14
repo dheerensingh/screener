@@ -1219,3 +1219,58 @@ backtest, not against a few weeks):**
   (the live configuration's backtest max is -16%), or the win rate is under 20%
   after 40 closed trades.
 - Until then, no stock-rule changes from paper results alone.
+
+## 21. Plan to beat Nifty500, phase 0-1: TRI benchmark and the edge test (2026-11-14)
+
+**Plan** (agreed 2026-11-14): measure against the right benchmark (phase 0), find
+out where the edge really is (phase 1), then test an index core plus this strategy
+as a satellite plus gold (phase 2), paper-trade the winner with success criteria
+written in advance (phase 3), review on 2027-04-01 or at 60 closed trades (phase 4).
+
+**Phase 0 — measurement (live on the dashboard).** The benchmark is now the
+Nifty500 **Total Return Index**, rebuilt from the price index and NSE's published
+dividend yield (`modules/benchmark.py`); the price index understated it by its
+yield, ~1.2-1.5% a year. The dashboard also shows the last 21 sessions vs the TRI,
+where the return came from (stocks / gold / liquid fund) and estimated short-term
+capital-gains tax (20.8%) on the financial year's net realized stock gains. Tax
+matters: swing profits pay 20.8%, an index fund held over a year 12.5% above
+₹1.25L of gains, so after tax the stock sleeve must beat the index by ~2pp a year
+just to draw level.
+
+**Phase 1 — is the stock selection better than chance?**
+(`backtest/run_edge_test.py`, stock rules only, 2017-11-17 to 2026-11-13, 12
+random runs each, GitHub Actions run 43598254913):
+
+| Version (same universe, sizing, stops, exits) | CAGR (5th / median / 95th) | Sharpe (median) | Max DD (median) | Real rules beat it (CAGR / Sharpe) |
+|---|---|---|---|---|
+| **Real rules** | **+12.2%** | **1.11** | -22.5% | |
+| Random order among qualifiers | +10.8 / +11.9 / +12.6% | 1.06 | -25.7% | 75% / 92% |
+| Random liquid member of the same sectors (no screen) | +14.4 / +15.7 / +16.7% | 1.47 | -19.7% | **0% / 8%** |
+| Real screen in 4 random sectors | +6.0 / +8.6 / +9.7% | 0.87 | -19.8% | **100% / 92%** |
+
+RSI at entry: a ceiling of 70 gave +12.5% / -16.3% / Sharpe 1.22, but 75 gave
++11.3% / -23.9% / 1.01 and 80 gave +12.1% / -25.4% / 1.04, and by bucket the real
+trades earned +0.41R (RSI <60), +0.18R (60-65), +0.06R (65-70), +0.23R (70-75),
++0.12R (75-80), +0.16R (80+) — no consistent pattern, so **no RSI ceiling**.
+
+**Honest reading.**
+
+- **The sector rotation is the edge.** The real screen inside random sectors lost
+  ~3.6pp of CAGR, and the real rules beat all 12 random-sector runs. Choosing the
+  sector is what works.
+- **The stock screen did not beat random stocks from the same sectors** — it lost
+  to every one of 12 runs (+12.2% vs a +15.7% median). The ranking among qualifiers
+  adds a little (75th percentile).
+- **But survivorship bias does not treat both sides equally here.** The universe
+  is today's Nifty500, so stocks that collapsed and left the index are missing.
+  A random pick from a sector can never land on one of those, while in real life
+  it often would; the momentum screen avoids such stocks in real life anyway. So
+  the random-member result is flattered more than the real rules are. The test
+  therefore does *not* prove the screen is worse — it proves the backtest cannot
+  show the screen is better.
+- **Next test (proposed): sector rotation on real sector indices.** NSE's daily
+  index file has every sectoral index's history, including stocks that later
+  left — no survivorship bias. Rotating into the top sectoral indices (investable
+  through sector ETFs) and comparing with the Nifty500 TRI is the clean test of
+  the one edge this shows, and a candidate core for phase 2.
+- **No live rule changes** (the review rule in §20 stands).

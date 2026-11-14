@@ -23,6 +23,7 @@ from datetime import datetime
 from typing import Optional
 from zoneinfo import ZoneInfo
 
+from .benchmark import history_tri
 from .fii_dii_flow import FlowResult
 from .market_regime import MarketRegime
 from .paper_trader import COST_PCT_PER_SIDE, EQUITY_PATH, GOLD_PATH, LEDGER_PATH, PaperState
@@ -118,6 +119,19 @@ def _table(headers: list[str], rows: list[list[str]], empty: str, num: set[int] 
     return render(rows)
 
 
+# Short-term capital gains tax on listed shares held under a year (from 2024-07-23), plus 4% cess.
+STCG_TAX_PCT = 20.8
+
+
+def estimated_trading_tax(closed: list[dict], as_of: str) -> tuple[float, str]:
+    """(estimated STCG tax, "2026-27") on the current financial year's net realized stock P&L."""
+    d = datetime.strptime(as_of, "%Y-%m-%d") if as_of else datetime.now()
+    start_year = d.year if d.month >= 4 else d.year - 1
+    fy_start, fy_end = f"{start_year}-04-01", f"{start_year + 1}-03-31"
+    net = sum(float(r["pnl"]) for r in closed if fy_start <= r["exit_date"] <= fy_end)
+    return max(0.0, net) * STCG_TAX_PCT / 100.0, f"{start_year}-{str(start_year + 1)[2:]}"
+
+
 def _tile(label: str, value: str, sub: str = "") -> str:
     return (f'<div class="tile"><div class="tile-label">{_e(label)}</div>'
             f'<div class="tile-value">{value}</div>'
@@ -143,11 +157,20 @@ def build_dashboard_html(
     equity = state.equity
     total_return = (equity / start - 1.0) * 100.0 if start else 0.0
 
-    bench_return = float("nan")
-    if history:
-        b0, b1 = float(history[0]["benchmark_close"]), float(history[-1]["benchmark_close"])
-        if b0:
-            bench_return = (b1 / b0 - 1.0) * 100.0
+    # Benchmark = Nifty500 Total Return Index (price + dividends), rebuilt by modules/benchmark.py.
+    tri = history_tri(history)
+    bench_return = (tri[-1] / tri[0] - 1.0) * 100.0 if tri and tri[0] else float("nan")
+    price_return = float("nan")
+    if history and float(history[0]["benchmark_close"]):
+        price_return = (float(history[-1]["benchmark_close"]) / float(history[0]["benchmark_close"]) - 1.0) * 100.0
+    # Last 21 sessions (about a month), portfolio vs TRI.
+    k = max(0, len(history) - 22)
+    recent = ((float(history[-1]["equity"]) / float(history[k]["equity"]) - 1.0) * 100.0,
+              (tri[-1] / tri[k] - 1.0) * 100.0) if len(history) > 1 else None
+    # Where the return came from (rupees): gold and liquid-fund income are exact; stocks are the rest.
+    gold_pnl, liquid = state.gold_pnl, state.cash_income
+    stocks_pnl = (equity - start) - gold_pnl - liquid
+    tax, fy = estimated_trading_tax(state.closed, state.as_of)
     equity_series = [float(h["equity"]) for h in history]
     max_dd = _max_drawdown_pct(equity_series) if equity_series else 0.0
 
@@ -161,8 +184,15 @@ def build_dashboard_html(
     alpha = total_return - bench_return if bench_return == bench_return else float("nan")
     tiles = "".join([
         _tile("Total return", _signed(total_return, "+.2f", "%"), f"since {_e(history[0]['date']) if history else 'start'}"),
-        _tile("Nifty500, same period", _signed(bench_return, "+.2f", "%"),
-              f"difference {_signed(alpha, '+.2f', ' pp')}" if alpha == alpha else "first snapshot today"),
+        _tile("Nifty500 TRI, same period", _signed(bench_return, "+.2f", "%"),
+              (f"difference {_signed(alpha, '+.2f', ' pp')} · price index {_signed(price_return, '+.2f', '%')}"
+               if alpha == alpha else "first snapshot today")),
+        _tile("Last 21 sessions", _signed(recent[0], "+.2f", "%") if recent else "—",
+              f"Nifty500 TRI {_signed(recent[1], '+.2f', '%')}" if recent else "needs two snapshots"),
+        _tile("Where the return came from", _signed_inr(equity - start),
+              f"stocks {_signed_inr(stocks_pnl)} · gold {_signed_inr(gold_pnl)} · liquid fund {_signed_inr(liquid)}"),
+        _tile(f"Est. tax on trading gains, FY{fy}", inr(tax),
+              f"{STCG_TAX_PCT:g}% of net realized stock gains (losses offset); index not taxed until sold"),
         _tile("Realized P&L", _signed_inr(state.realized_pnl), f"{len(closed)} closed trade{'s' if len(closed) != 1 else ''}"),
         _tile("Unrealized P&L", _signed_inr(state.unrealized_pnl), f"{len(state.positions)} open position{'s' if len(state.positions) != 1 else ''}"),
         _tile("Gold ETF", inr(state.gold_value),
@@ -260,11 +290,10 @@ def build_dashboard_html(
     context_html = f'<ul class="context">{"".join(context)}</ul>' if context else ""
 
     # ── Chart data ───────────────────────────────────────────────────────────
-    b0 = float(history[0]["benchmark_close"]) if history else 0.0
     chart_data = {
         "dates": [h["date"] for h in history],
         "equity": [round(float(h["equity"]), 2) for h in history],
-        "benchmark": [round(start * float(h["benchmark_close"]) / b0, 2) if b0 else None for h in history],
+        "benchmark": [round(start * t / tri[0], 2) if tri and tri[0] else None for t in tri],
         "trades": [{"label": f'{r["ticker"]} ({r["exit_date"]})', "pnl": round(float(r["pnl"]), 2)} for r in closed],
         "exposure": sorted(
             ({"sector": s, "value": round(sum(p.market_value for p in positions if p.sector == s), 2)}
@@ -360,8 +389,8 @@ footer {{ color: var(--muted); font-size: 12px; margin-top: 24px; }}
 
 <div class="card">
   <h2>Equity vs Nifty500</h2>
-  <p class="card-desc">The paper portfolio's value each session, against what the same starting capital would be worth in the Nifty500.</p>
-  <div class="legend"><span><span class="key" style="background:var(--series-1)"></span>Paper portfolio</span><span><span class="key" style="background:var(--context)"></span>Nifty500 (same start)</span></div>
+  <p class="card-desc">The paper portfolio's value each session, against what the same starting capital would be worth in the Nifty500 Total Return Index (dividends included).</p>
+  <div class="legend"><span><span class="key" style="background:var(--series-1)"></span>Paper portfolio</span><span><span class="key" style="background:var(--context)"></span>Nifty500 TRI (same start)</span></div>
   <div class="chart-box"><canvas id="equityChart" aria-label="Equity versus Nifty500 line chart" role="img"></canvas><p class="empty" id="equityEmpty" hidden>The curve appears after the second daily run.</p></div>
   <details><summary>Show data table</summary>{equity_table}</details>
 </div>
@@ -496,7 +525,7 @@ footer {{ color: var(--muted); font-size: 12px; margin-top: 24px; }}
 
   if (show('equityEmpty', data.dates.length >= 2)) {{
     new Chart(document.getElementById('equityChart'), {{ type: 'line',
-      data: {{ labels: data.dates, datasets: [lineDs('Paper', data.equity, C.s1, false), lineDs('Nifty500', data.benchmark, C.ctx, false)] }},
+      data: {{ labels: data.dates, datasets: [lineDs('Paper', data.equity, C.s1, false), lineDs('Nifty500 TRI', data.benchmark, C.ctx, false)] }},
       options: lineOpts(inr, 120), plugins: [crosshair, endLabels(inr)] }});
   }}
 
@@ -504,7 +533,7 @@ footer {{ color: var(--muted); font-size: 12px; margin-top: 24px; }}
   const pct = x => x.toFixed(1) + '%';
   if (show('drawdownEmpty', data.dates.length >= 2)) {{
     new Chart(document.getElementById('drawdownChart'), {{ type: 'line',
-      data: {{ labels: data.dates, datasets: [lineDs('Paper', dd(data.equity), C.s1, true), lineDs('Nifty500', dd(data.benchmark), C.ctx, false)] }},
+      data: {{ labels: data.dates, datasets: [lineDs('Paper', dd(data.equity), C.s1, true), lineDs('Nifty500 TRI', dd(data.benchmark), C.ctx, false)] }},
       options: lineOpts(pct, 10), plugins: [crosshair] }});
   }}
 

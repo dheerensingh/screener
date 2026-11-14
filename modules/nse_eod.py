@@ -120,6 +120,20 @@ def index_close(d: date, name: str = "Nifty 500") -> Optional[float]:
     return float(pd.to_numeric(row["Closing Index Value"], errors="coerce").iloc[0])
 
 
+def index_div_yield(d: date, name: str = "Nifty 500") -> Optional[float]:
+    """The index's dividend yield (% a year) on `d`, from the same NSE file — for the TRI (modules/benchmark.py)."""
+    if d not in _index_cache:
+        _index_cache[d] = _get_csv(INDEX_URL.format(d=d.strftime("%d%m%Y")))
+    df = _index_cache[d]
+    if df is None or "Index Name" not in df or "Div Yield" not in df or not _file_date_ok(df, "Index Date", d):
+        return None
+    row = df[df["Index Name"].astype(str).str.strip().str.lower() == name.lower()]
+    if row.empty:
+        return None
+    v = float(pd.to_numeric(row["Div Yield"], errors="coerce").iloc[0])
+    return v if v == v and 0 < v < 10 else None
+
+
 def recent_sessions(n: int = RECENT_SESSIONS, now: Optional[datetime] = None) -> list[date]:
     """The last `n` sessions up to the latest completed one (holiday list permitting)."""
     from .market_calendar import load_holidays, previous_trading_day
