@@ -57,6 +57,31 @@ MAX_ADDS_PER_STOCK = 2
 ADD_RISK_FRACTIONS = (0.5, 0.25)  # 1st add, 2nd add — of the stock's cap-band risk
 MIN_SESSIONS_BETWEEN_LOTS = 5
 
+# ── Order size floor (2026-11-14, STRATEGY.md §20) — OFF ─────────────────────
+# When capital runs low the sizer produces scraps (1 share of KOTAKBANK for ₹489).
+# A floor was built to skip them — an order worth under MIN_ORDER_VALUE_INR, or cut
+# by the capital left to under MIN_RISK_FILLED_FRACTION of its risk budget — and
+# backtested: every floor tried (₹5k, ₹10k, 25%, 50%) lowered CAGR and Sharpe, so
+# both are 0 (off). The check stays wired in (allocation, paper fill, backtest) so a
+# floor can be switched back on here. Note for real money: the backtest charges a
+# percentage cost only; a flat per-order charge (e.g. DP fees on a sale) would make
+# scrap orders worse than it shows.
+MIN_ORDER_VALUE_INR = 0.0
+MIN_RISK_FILLED_FRACTION = 0.0
+
+
+def order_too_small(value: float, risk: float, intended_risk: float, cut_by_capital: bool,
+                    min_value: float = MIN_ORDER_VALUE_INR,
+                    min_fraction: float = MIN_RISK_FILLED_FRACTION) -> Optional[str]:
+    """None if the order is worth placing, else why not."""
+    if value < min_value:
+        return f"Order would be only ₹{value:,.0f} (minimum ₹{min_value:,.0f})"
+    if cut_by_capital and intended_risk > 0 and risk < min_fraction * intended_risk:
+        return (f"Capital left would cut it to ₹{risk:,.0f} of its ₹{intended_risk:,.0f} risk "
+                f"(under {min_fraction:.0%})")
+    return None
+
+
 CAP_BAND_RISK_PCT = {
     "Large": 1.0,
     "Mid": 0.75,
@@ -67,6 +92,15 @@ DEFAULT_RISK_PCT = 0.75  # used when cap_band is unknown/blank
 # more of the 15 slots fit under the 85% capital cap (0.75 → 0.75% / 0.56% /
 # 0.375%). Chosen from the 9-year backtest in STRATEGY.md §17.
 RISK_SCALE = 0.75
+
+# ── Gold slice (2026-10-17, STRATEGY.md §19) ─────────────────────────────────
+# GOLD_WEIGHT_PCT of equity is held in a gold ETF at all times (no trend rule —
+# it tested worse), brought back to target on the first run of each month when it
+# has drifted more than GOLD_REBALANCE_BAND_PCT of equity. Gold counts toward the
+# 85% capital cap. Idle cash earns a liquid-fund yield (modules/cash_yield.py).
+GOLD_TICKER = "GOLDBEES"  # Nippon India Gold BeES on NSE
+GOLD_WEIGHT_PCT = 10.0
+GOLD_REBALANCE_BAND_PCT = 2.0
 
 
 @dataclass
@@ -226,6 +260,13 @@ def allocate(
         )
         if pos.error or pos.quantity <= 0:
             result.rejected.append((r, pos.error or "Sized to zero quantity"))
+            continue
+        too_small = order_too_small(
+            pos.allocation_rupees, pos.risk_amount, pos.intended_risk_amount,
+            cut_by_capital=pos.capped_by_max_position and remaining_capital_pct < max_position_pct,
+        )
+        if too_small:
+            result.rejected.append((r, too_small))
             continue
 
         result.accepted.append((r, pos))

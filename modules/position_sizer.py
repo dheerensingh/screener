@@ -38,12 +38,13 @@ class PositionSize:
     stop_multiplier: float
     stop_price: float
     stop_distance: float
-    risk_amount: float
+    risk_amount: float              # rupees actually at risk at `quantity` (quantity × stop_distance)
     quantity: int
     allocation_rupees: float
     allocation_pct: float
     capped_by_max_position: bool
     capped_by_max_stop_pct: bool = False
+    intended_risk_amount: float = float("nan")  # account × risk %, before the quantity was rounded or capped
     error: Optional[str] = None
 
     @property
@@ -52,10 +53,14 @@ class PositionSize:
             return self.error
         cap_note = " (capped at max position %)" if self.capped_by_max_position else ""
         stop_note = " [stop capped at max %]" if self.capped_by_max_stop_pct else ""
+        intended = self.intended_risk_amount
         return (
-            f"risk_amount = ₹{self.account_size:,.0f} × {self.risk_pct_per_trade:.1f}% = ₹{self.risk_amount:,.0f}  |  "
+            f"risk budget = ₹{self.account_size:,.0f} × {self.risk_pct_per_trade:.2f}% = ₹{intended:,.0f}  |  "
             f"stop = ₹{self.entry_price:.2f} − ₹{self.stop_distance:.2f}{stop_note} = ₹{self.stop_price:.2f}  |  "
-            f"qty = floor(₹{self.risk_amount:,.0f} / ₹{self.stop_distance:.2f}) = {self.quantity}{cap_note}"
+            f"qty = floor(₹{intended:,.0f} / ₹{self.stop_distance:.2f}) = "
+            f"{(str(math.floor(intended / self.stop_distance)) + ' → ') if self.capped_by_max_position else ''}"
+            f"{self.quantity}{cap_note}  |  "
+            f"at risk = {self.quantity} × ₹{self.stop_distance:.2f} = ₹{self.risk_amount:,.0f}"
         )
 
 
@@ -123,6 +128,9 @@ def size_position(
         capped = True
 
     allocation_pct = (allocation_rupees / account_size * 100.0) if account_size else 0.0
+    # What this order really risks. Until 2026-11-14 this stayed at the full risk budget even
+    # when the quantity was capped, overstating portfolio heat (STRATEGY.md §20).
+    actual_risk = quantity * stop_distance
 
     return PositionSize(
         ticker=result.ticker,
@@ -133,10 +141,11 @@ def size_position(
         stop_multiplier=atr_stop_multiplier,
         stop_price=stop_price,
         stop_distance=stop_distance,
-        risk_amount=risk_amount,
+        risk_amount=actual_risk,
         quantity=quantity,
         allocation_rupees=allocation_rupees,
         allocation_pct=allocation_pct,
         capped_by_max_position=capped,
         capped_by_max_stop_pct=stop_capped,
+        intended_risk_amount=risk_amount,
     )
