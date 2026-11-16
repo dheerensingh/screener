@@ -1,0 +1,2 @@
+order_id,status,signal_date,signal_price,units,fill_date,fill_price,cost,note
+2026-11-16-GOLD,PENDING,2026-11-16,110.06,438,,,0,Buy toward 10% of equity
